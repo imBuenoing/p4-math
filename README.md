@@ -17,6 +17,10 @@ python3 -m http.server 8080
 
 Optional: put a real key in `config.js` locally to try Gemini marking/chat. Leave the placeholder to use local marks only.
 
+## Access PIN
+
+The landing page and papers stay locked until the 4-digit site access code is entered. Only a hash is stored (`ACCESS_PIN_HASH`). Unlock lasts for the browser tab session; use **Lock** on the landing page to require the code again.
+
 ## Parent PIN
 
-Only a hash is stored in the page (`PIN_HASH`). To change it, open the browser console and run `pinHash('your-pin')`, then paste the result into `index.html`.
+Used to mark a paper or clear saved data. Only a hash is stored (`PIN_HASH`). To change either PIN, open the browser console and run `pinHash('your-pin')`, then paste the result into `index.html`.
