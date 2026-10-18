@@ -1,0 +1,44 @@
+name: Deploy Processed Files to Main Branch Root
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Inject API Key into config.js
+        run: |
+          if [ ! -f config.js ]; then
+            echo "ERROR: config.js not found in repository root!"
+            exit 1
+          fi
+
+          sed "s|__GEMINI_API_KEY_PLACEHOLDER__|${{ secrets.GEMINI_API_KEY }}|g" config.js > config.js.tmp
+          mv config.js.tmp config.js
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+
+          if ! git diff --quiet HEAD -- config.js index.html; then
+            git add config.js index.html
+            git commit -m "Inject API key and update site files [skip ci]"
+            git push origin main
+          else
+            echo "No changes to commit to config.js or index.html."
+          fi
