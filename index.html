@@ -63,17 +63,33 @@
   <marker id="ah" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#64748b"/></marker>
 </defs></svg>
 
+<!-- ===================== ACCESS GATE ===================== -->
+<div id="access-gate" class="max-w-md mx-auto">
+  <div id="access-box" class="bg-white rounded-2xl shadow-xl p-8 text-center">
+    <div class="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-50 text-2xl" aria-hidden="true">🔒</div>
+    <h1 class="text-2xl font-bold text-blue-600">P4 Maths Practice Papers</h1>
+    <p class="text-slate-500 mt-2 text-sm">This practice site is private. Enter the 4-digit access code to continue.</p>
+    <label for="access-pin" class="sr-only">Access code</label>
+    <input id="access-pin" type="password" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" maxlength="4" aria-label="4-digit access code" class="inp mt-6 w-44 text-center text-3xl tracking-[0.55em] font-semibold" placeholder="••••">
+    <p id="access-error" class="text-sm text-red-600 min-h-[1.25rem] mt-3" role="status" aria-live="polite"></p>
+    <button type="button" id="access-ok" onclick="checkAccessPin()" class="mt-2 w-full bg-blue-600 hover:bg-blue-700 text-white font-bold px-6 py-3 rounded-xl shadow-lg transition">Unlock</button>
+    <p class="text-xs text-slate-400 mt-4">Ask a parent or teacher if you do not know the code.</p>
+  </div>
+</div>
+
 <!-- ===================== LANDING ===================== -->
-<div id="landing" class="max-w-5xl mx-auto">
+<div id="landing" class="hidden max-w-5xl mx-auto">
   <header class="bg-white rounded-2xl shadow-xl p-6 md:p-8 mb-6">
     <div class="flex flex-col md:flex-row md:items-end md:justify-between gap-4">
       <div>
+        <p class="text-xs font-semibold uppercase tracking-wide text-blue-500 mb-1">Private practice · access unlocked</p>
         <h1 class="text-3xl font-bold text-blue-600">P4 Maths Practice Papers</h1>
         <p class="text-slate-500 mt-1">2025 End-of-Year examinations · choose a paper to start, continue or review</p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <label for="student-name" class="text-sm text-slate-600">Name</label>
         <input id="student-name" class="inp w-56" placeholder="Your name (optional)">
+        <button type="button" onclick="lockAccess()" class="text-sm font-medium text-slate-600 hover:bg-slate-50 border border-slate-300 rounded-lg px-3 py-2" title="Lock the site again">Lock</button>
       </div>
     </div>
     <div id="overall" class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center"></div>
@@ -2111,9 +2127,13 @@ const MARKING_API = {
   headers: { "Content-Type": "application/json", "x-goog-api-key": GEMINI.apiKey }
 };
 
-/* Parent PIN. Only a hash is stored. To change it, open the browser console on
-   this page, run  pinHash('1234')  and paste the result here. */
+/* Parent PIN (mark / clear data). Only a hash is stored. To change it, open the
+   browser console on this page, run  pinHash('1234')  and paste the result here. */
 const PIN_HASH = 'c4f72bb0';
+
+/* Site access PIN (landing / papers). Hash only — same pinHash() helper. */
+const ACCESS_PIN_HASH = '86e38212';
+const ACCESS_STORE_KEY = 'p4maths.access';
 
 const STORE_KEY = 'p4maths.v1';
 const DAYS = ['Monday','Tuesday','Wednesday','Thursday','Friday'];
@@ -2189,6 +2209,7 @@ function renderLanding() {
 $id('student-name').addEventListener('input', e => { store.name = e.target.value; saveStore(); });
 
 function goHome() {
+  if (!hasAccess()) { showAccessGate(); return; }
   if (TEST && !marked) saveAnswers();
   TEST = null; closeChat(); document.body.classList.add('chat-hidden');
   $id('test-view').classList.add('hidden'); $id('landing').classList.remove('hidden');
@@ -2208,6 +2229,7 @@ function retakeTest(id) {
 
 /* ===================== OPEN A TEST ===================== */
 function openTest(id) {
+  if (!hasAccess()) { showAccessGate(); return; }
   const t = TESTS.find(x => x.id === id); if (!t) return goHome();
   TEST = t; QUESTIONS = t.questions; att = attemptFor(id);
   marked = att.status === 'marked'; pinPassed = false;
@@ -2719,6 +2741,63 @@ function pinHash(pin) {
   for (const c of 'p4maths|' + String(pin).trim()) { x ^= c.codePointAt(0); x = Math.imul(x, 0x01000193) >>> 0; }
   return x.toString(16).padStart(8, '0');
 }
+
+/* ===================== SITE ACCESS GATE ===================== */
+let accessFails = 0, accessLockUntil = 0;
+function hasAccess() {
+  try { return sessionStorage.getItem(ACCESS_STORE_KEY) === ACCESS_PIN_HASH; }
+  catch (_) { return false; }
+}
+function showAccessGate() {
+  TEST = null;
+  try { closeChat(); } catch (_) {}
+  document.body.classList.add('chat-hidden');
+  $id('landing').classList.add('hidden');
+  $id('test-view').classList.add('hidden');
+  $id('access-gate').classList.remove('hidden');
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  const i = $id('access-pin');
+  $id('access-error').textContent = '';
+  if (i) { i.value = ''; setTimeout(() => i.focus(), 30); }
+  window.scrollTo(0, 0);
+}
+function unlockAccess() {
+  try { sessionStorage.setItem(ACCESS_STORE_KEY, ACCESS_PIN_HASH); } catch (_) {}
+  $id('access-gate').classList.add('hidden');
+  $id('landing').classList.remove('hidden');
+  accessFails = 0;
+  renderLanding();
+  window.scrollTo(0, 0);
+}
+function lockAccess() {
+  if (TEST && !marked) saveAnswers();
+  TEST = null;
+  try { closeChat(); } catch (_) {}
+  document.body.classList.add('chat-hidden');
+  try { sessionStorage.removeItem(ACCESS_STORE_KEY); } catch (_) {}
+  showAccessGate();
+}
+function checkAccessPin() {
+  const err = $id('access-error'), input = $id('access-pin');
+  const wait = Math.ceil((accessLockUntil - Date.now()) / 1000);
+  if (wait > 0) { err.textContent = `Too many tries. Please wait ${wait} s.`; return; }
+  const raw = String(input.value || '').trim();
+  if (!/^\d{4}$/.test(raw)) { err.textContent = 'Enter the 4-digit access code.'; input.focus(); return; }
+  if (pinHash(raw) === ACCESS_PIN_HASH) { unlockAccess(); return; }
+  accessFails++; input.value = '';
+  const box = $id('access-box'); box.classList.remove('shake'); void box.offsetWidth; box.classList.add('shake');
+  if (accessFails >= 3) { accessLockUntil = Date.now() + 30000; accessFails = 0; err.textContent = 'Wrong code 3 times. Please wait 30 s.'; }
+  else err.textContent = 'Wrong code, please try again.';
+  input.focus();
+}
+$id('access-pin').addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); checkAccessPin(); }
+});
+$id('access-pin').addEventListener('input', e => {
+  e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
+  $id('access-error').textContent = '';
+  if (e.target.value.length === 4) checkAccessPin();
+});
 function askPin({ title, msg, okLabel, blanks }, onOk) {
   pinAction = onOk;
   $id('pin-title').textContent = title; $id('pin-msg').textContent = msg; $id('pin-ok').textContent = okLabel;
@@ -3177,6 +3256,9 @@ function downloadProgressPdf() {
 window.addEventListener('beforeunload', () => { if (TEST && !marked) saveAnswers(); });
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && TEST && !marked) saveAnswers(); });
 (function start() {
+  if (!hasAccess()) { showAccessGate(); return; }
+  $id('access-gate').classList.add('hidden');
+  $id('landing').classList.remove('hidden');
   const m = location.hash.match(/paper=([\w-]+)/);
   if (m && TESTS.some(t => t.id === m[1])) openTest(m[1]); else renderLanding();
 })();
