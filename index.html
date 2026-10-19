@@ -122,7 +122,7 @@
     <h1 id="test-title" class="text-3xl font-bold text-blue-600"></h1>
     <p id="test-sub" class="text-slate-500 mt-2"></p>
     <p id="test-student" class="text-sm text-slate-600 mt-2"></p>
-    <p id="paper-timer-line" class="mt-3 text-sm text-slate-500">Elapsed <span id="paper-timer" class="font-mono font-semibold text-slate-700">0:00</span> · Question <span id="q-pos" class="font-semibold text-slate-700">1</span> of <span id="q-total">0</span></p>
+    <p id="paper-timer-line" class="mt-3 text-sm text-slate-500">Elapsed <span id="paper-timer" class="font-mono font-semibold text-slate-700">0:00</span> · Screen <span id="q-pos" class="font-semibold text-slate-700">1</span> of <span id="q-total">0</span></p>
   </header>
 
   <div id="results-card" class="hidden mb-8 p-6 rounded-xl bg-blue-50 border border-blue-200 text-center">
@@ -2164,33 +2164,84 @@ function saveStore() {
 }
 const attemptFor = id => (store.attempts[id] ||= {
   status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: [],
-  timings: {}, startedAt: null, finishedAt: null, qIndex: 0
+  timings: {}, startedAt: null, finishedAt: null, pageIndex: 0, qIndex: 0
 });
 
 /* ===================== CURRENT TEST STATE ===================== */
-let TEST = null, QUESTIONS = [], att = null;
+let TEST = null, QUESTIONS = [], PAGES = [], att = null;
 let marked = false, results = {}, pinPassed = false, aiOverall = '', submittedAt = null;
 let chatLog = [], chatHistory = [], chatBusy = false, activeQ = null;
-let qIndex = 0, timingOnQ = null, timingStartedAt = 0, paperTimerHandle = null;
+let pageIndex = 0, timingOnPage = null, timingStartedAt = 0, paperTimerHandle = null;
 const qById = id => QUESTIONS.find(q => q.id === id);
 const sectionOf = id => TEST.sections.find(s => s.id === id);
 const maxMarks = t => t.questions.reduce((s, q) => s + q.marks, 0);
+const qStem = id => { const m = String(id).match(/^(\d+)([a-z]?)$/i); return m ? m[1] : String(id); };
+const pageKey = page => page.map(q => q.id).join('+');
+const pageLabel = page => {
+  const ids = page.map(q => q.id);
+  if (ids.length === 1) return 'Q' + ids[0];
+  const stems = [...new Set(ids.map(qStem))];
+  if (stems.length === 1 && ids.every(id => /[a-z]$/i.test(id))) {
+    const letters = ids.map(id => id.slice(qStem(id).length)).join('–');
+    return `Q${stems[0]}${letters}`;
+  }
+  return 'Q' + ids[0] + '–' + ids[ids.length - 1];
+};
+function sharedQuestionRange(pre) {
+  if (!pre) return null;
+  const text = String(pre).replace(/<[^>]+>/g, ' ');
+  let m = text.match(/Questions?\s+(\d+)\s+and\s+(\d+)/i);
+  if (m) return [m[1], m[2]];
+  m = text.match(/Questions?\s+(\d+)\s*(?:to|-|–)\s*(\d+)/i);
+  if (m) {
+    const a = +m[1], b = +m[2], out = [];
+    for (let n = Math.min(a, b); n <= Math.max(a, b); n++) out.push(String(n));
+    return out;
+  }
+  return null;
+}
+function buildPages(questions) {
+  const pages = [];
+  let i = 0;
+  while (i < questions.length) {
+    const start = questions[i];
+    const stem = qStem(start.id);
+    const group = [start];
+    i++;
+    while (i < questions.length && qStem(questions[i].id) === stem && /[a-z]$/i.test(questions[i].id)) group.push(questions[i++]);
+    const range = sharedQuestionRange(start.pre || '');
+    if (range) {
+      const want = new Set(range.map(String));
+      while (i < questions.length && want.has(qStem(questions[i].id))) {
+        const s = qStem(questions[i].id);
+        group.push(questions[i++]);
+        while (i < questions.length && qStem(questions[i].id) === s && /[a-z]$/i.test(questions[i].id)) group.push(questions[i++]);
+      }
+    }
+    pages.push(group);
+  }
+  return pages;
+}
+function pageOfQuestion(qid) { return PAGES.find(p => p.some(q => q.id === qid)); }
 function fmtDuration(ms) {
   const s = Math.max(0, Math.round((ms || 0) / 1000));
   const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
   if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
-function questionTimeMs(qid) {
-  const base = att?.timings?.[qid]?.ms || 0;
-  if (!marked && timingOnQ === qid && timingStartedAt) return base + Math.max(0, Date.now() - timingStartedAt);
+function pageTimeMs(key) {
+  const base = att?.timings?.[key]?.ms || 0;
+  if (!marked && timingOnPage === key && timingStartedAt) return base + Math.max(0, Date.now() - timingStartedAt);
   return base;
 }
+function questionTimeMs(qid) {
+  const page = pageOfQuestion(qid);
+  if (page) return pageTimeMs(pageKey(page));
+  return pageTimeMs(qid);
+}
 function totalTrackedMs() {
-  if (!att) return 0;
-  let sum = 0;
-  QUESTIONS.forEach(q => { sum += questionTimeMs(q.id); });
-  return sum;
+  if (!att || !PAGES.length) return 0;
+  return PAGES.reduce((s, p) => s + pageTimeMs(pageKey(p)), 0);
 }
 function paperElapsedMs() {
   if (!att?.startedAt) return 0;
@@ -2244,7 +2295,7 @@ $id('student-name').addEventListener('input', e => { store.name = e.target.value
 function goHome() {
   if (!hasAccess()) { showAccessGate(); return; }
   if (TEST && !marked) { flushQuestionTime(); saveAnswers(); }
-  stopPaperTimer(); timingOnQ = null;
+  stopPaperTimer(); timingOnPage = null;
   TEST = null; closeChat(); document.body.classList.add('chat-hidden');
   $id('test-view').classList.add('hidden'); $id('landing').classList.remove('hidden');
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -2256,7 +2307,7 @@ function retakeTest(id) {
   const t = TESTS.find(x => x.id === id), a = store.attempts[id];
   if (a?.status === 'marked' && !confirm(`Retake ${t.short}? Your answers, marks and chat for this paper will be cleared (the score ${scoreOf(a)}/${maxMarks(t)} is kept in the history). Download the PDFs first if you want to keep them.`)) return;
   const hist = (a?.history || []).concat(a?.status === 'marked' ? [{ score: scoreOf(a), max: maxMarks(t), at: a.submittedAt }] : []);
-  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist, timings: {}, startedAt: null, finishedAt: null, qIndex: 0 };
+  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist, timings: {}, startedAt: null, finishedAt: null, pageIndex: 0, qIndex: 0 };
   saveStore();
   openTest(id);
 }
@@ -2265,10 +2316,10 @@ function retakeTest(id) {
 function openTest(id) {
   if (!hasAccess()) { showAccessGate(); return; }
   const t = TESTS.find(x => x.id === id); if (!t) return goHome();
-  stopPaperTimer(); timingOnQ = null;
-  TEST = t; QUESTIONS = t.questions; att = attemptFor(id);
+  stopPaperTimer(); timingOnPage = null;
+  TEST = t; QUESTIONS = t.questions; PAGES = buildPages(QUESTIONS); att = attemptFor(id);
   att.timings ||= {};
-  QUESTIONS.forEach(q => { att.timings[q.id] ||= { ms: 0 }; });
+  PAGES.forEach(p => { att.timings[pageKey(p)] ||= { ms: 0 }; });
   marked = att.status === 'marked'; pinPassed = false;
   results = att.results || {}; aiOverall = att.aiOverall || ''; submittedAt = att.submittedAt ? new Date(att.submittedAt) : null;
   chatLog = att.chatLog ||= []; chatHistory = att.chatHistory ||= []; activeQ = null;
@@ -2278,7 +2329,7 @@ function openTest(id) {
   $id('test-sub').textContent = `Primary 4 Mathematics · ${t.exam} · Total marks: ${maxMarks(t)}`;
   $id('test-student').textContent = store.name ? `Student: ${store.name}` : '';
   $id('save-status').textContent = '';
-  $id('q-total').textContent = String(QUESTIONS.length);
+  $id('q-total').textContent = String(PAGES.length);
   history.replaceState(null, '', '#paper=' + id);
 
   if (!marked && !att.startedAt) att.startedAt = Date.now();
@@ -2292,8 +2343,14 @@ function openTest(id) {
   $id('submit-area').classList.toggle('hidden', false);
   document.body.classList.add('chat-hidden');
 
-  qIndex = Math.min(Math.max(0, att.qIndex || 0), QUESTIONS.length - 1);
-  showQuestionPage(qIndex, { resumeTiming: !marked });
+  // Resume page index; migrate older attempts that only stored qIndex
+  let startPage = att.pageIndex;
+  if (startPage == null && att.qIndex != null) {
+    const qid = QUESTIONS[att.qIndex]?.id;
+    startPage = Math.max(0, PAGES.findIndex(p => p.some(q => q.id === qid)));
+  }
+  pageIndex = Math.min(Math.max(0, startPage || 0), PAGES.length - 1);
+  showQuestionPage(pageIndex);
   if (!marked) startPaperTimer();
   else updatePaperTimerDisplay();
 
@@ -2305,14 +2362,16 @@ function openTest(id) {
 const marksLabel = q => q.sec === 'C' ? ` <span class="text-slate-400 text-sm">[${q.marks}]</span>` : '';
 const choiceOpts = q => (q.choices || []).map(c => Array.isArray(c) ? c : [c, c]);
 
+/* Reduce iOS Keyboard Math Results / predictive autocomplete on answer fields. */
+const NO_PRED = 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-1p-ignore="true" data-lpignore="true" data-form-type="other"';
 function fracBox() {
   return `<div class="inline-flex flex-col items-center gap-1">
-    <input type="text" inputmode="numeric" data-role="n" class="inp fin" aria-label="numerator" autocomplete="off">
+    <input type="text" data-role="n" class="inp fin" aria-label="numerator" ${NO_PRED}>
     <div class="w-14 border-t-2 border-slate-700"></div>
-    <input type="text" inputmode="numeric" data-role="d" class="inp fin" aria-label="denominator" autocomplete="off"></div>`;
+    <input type="text" data-role="d" class="inp fin" aria-label="denominator" ${NO_PRED}></div>`;
 }
 function selectHTML(q, role) {
-  return `<select data-role="${role}" class="inp"><option value="">— choose —</option>${choiceOpts(q).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
+  return `<select data-role="${role}" class="inp" autocomplete="off"><option value="">— choose —</option>${choiceOpts(q).map(([v, l]) => `<option value="${esc(v)}">${esc(l)}</option>`).join('')}</select>`;
 }
 
 function inputHTML(q) {
@@ -2321,27 +2380,27 @@ function inputHTML(q) {
     case 'mcq':
       return `<div class="grid gap-2 mt-3 ${q.optGrid || ''}">` + q.opts.map((o, i) => `
         <label class="opt flex items-center gap-3 p-2 rounded-lg border border-slate-200 hover:bg-slate-50 cursor-pointer">
-          <input type="radio" name="q${TEST.id}-${q.id}" value="${i + 1}" class="accent-blue-600 w-4 h-4 shrink-0">
+          <input type="radio" name="q${TEST.id}-${q.id}" value="${i + 1}" class="accent-blue-600 w-4 h-4 shrink-0" autocomplete="off">
           <span class="text-slate-500">(${i + 1})</span><span class="min-w-0">${o}</span>
         </label>`).join('') + `</div>`;
     case 'num':
-      return `<div class="mt-3 flex items-center gap-2">${ans}${q.prefix ? `<span>${q.prefix}</span>` : ''}<input type="text" inputmode="decimal" data-role="ans" class="inp w-40" autocomplete="off">${q.unit ? `<span>${q.unit}</span>` : ''}</div>`;
+      return `<div class="mt-3 flex items-center gap-2">${ans}${q.prefix ? `<span>${q.prefix}</span>` : ''}<input type="text" data-role="ans" class="inp w-40" ${NO_PRED}>${q.unit ? `<span>${q.unit}</span>` : ''}</div>`;
     case 'text':
-      return `<div class="mt-3 flex items-center gap-2">${ans}<input type="text" data-role="ans" class="inp w-40" autocomplete="off" placeholder="${esc(q.placeholder || '')}"></div>`;
+      return `<div class="mt-3 flex items-center gap-2">${ans}<input type="text" data-role="ans" class="inp w-40" placeholder="${esc(q.placeholder || '')}" ${NO_PRED}></div>`;
     case 'frac':
       return `<div class="mt-3 flex items-center gap-3">${ans}${fracBox()}${q.unit ? `<span>${q.unit}</span>` : ''}</div>`;
     case 'mixed':
-      return `<div class="mt-3 flex items-center gap-2">${ans}<input type="text" inputmode="numeric" data-role="w" class="inp fin" aria-label="whole number">${fracBox()}${q.unit ? `<span>${q.unit}</span>` : ''}</div>`;
+      return `<div class="mt-3 flex items-center gap-2">${ans}<input type="text" data-role="w" class="inp fin" aria-label="whole number" ${NO_PRED}>${fracBox()}${q.unit ? `<span>${q.unit}</span>` : ''}</div>`;
     case 'multi':
       return `<div class="mt-3 flex flex-wrap items-end gap-x-2 gap-y-3">${ans}` + q.fields.map((f, i) =>
         `<div class="flex items-center gap-1.5">${f.label ? `<span class="text-slate-700">${f.label}</span>` : (i && !f.unit && !q.fields[i - 1].unit ? '<span class="text-slate-400">,</span>' : '')}
-          <div class="flex flex-col items-center"><input type="text" data-role="f${i}" class="inp w-24 text-center" autocomplete="off">${f.hint ? `<span class="text-xs text-slate-400">${f.hint}</span>` : ''}</div>
+          <div class="flex flex-col items-center"><input type="text" data-role="f${i}" class="inp w-24 text-center" ${NO_PRED}>${f.hint ? `<span class="text-xs text-slate-400">${f.hint}</span>` : ''}</div>
           ${f.unit ? `<span>${f.unit}</span>` : ''}</div>`).join('') + `</div>`;
     case 'selects':
       if (q.stack) return `<div class="mt-3 space-y-2">` + q.rows.map((r, i) => `<div class="p-2 rounded-lg border border-slate-200 sm:flex sm:items-center sm:justify-between gap-3"><div class="text-sm text-slate-700 mb-1 sm:mb-0">${r.label}</div>${selectHTML(q, 's' + i)}</div>`).join('') + `</div>`;
       return `<div class="mt-3 flex flex-wrap items-center gap-2">${ans}` + q.rows.map((r, i) => `${r.label ? `<span class="text-slate-700">${r.label}</span>` : ''}${selectHTML(q, 's' + i)}`).join('') + `</div>`;
     case 'dayrange': {
-      const days = q.days || DAYS, sel = r => `<select data-role="${r}" class="inp"><option value="">— choose —</option>${days.map(d => `<option>${d}</option>`).join('')}</select>`;
+      const days = q.days || DAYS, sel = r => `<select data-role="${r}" class="inp" autocomplete="off"><option value="">— choose —</option>${days.map(d => `<option>${d}</option>`).join('')}</select>`;
       return `<div class="mt-3 flex flex-wrap items-center gap-2">${ans}<span>From</span>${sel('from')}<span>to</span>${sel('to')}</div>`;
     }
     case 'gridshade': return `<div class="fig" data-role="grid"></div>`;
@@ -2356,7 +2415,7 @@ function renderQuiz() {
   const box = $id('sections');
   box.innerHTML = `
     <div id="sec-banner" class="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200"></div>
-    <div id="q-stage"></div>
+    <div id="q-stage" class="space-y-4"></div>
     <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
       <button type="button" id="q-prev" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium">← Previous</button>
       <span id="q-page-hint" class="text-sm text-slate-500"></span>
@@ -2402,39 +2461,40 @@ function renderQuiz() {
       pb.textContent = on ? '📐 Hide protractor' : '📐 Show protractor';
     });
   });
-  $id('q-jump').innerHTML = QUESTIONS.map((q, i) =>
-    `<button type="button" data-qi="${i}" class="min-w-[2.25rem] px-2 py-1 rounded-md border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50">Q${q.id}</button>`
+  $id('q-jump').innerHTML = PAGES.map((page, i) =>
+    `<button type="button" data-pi="${i}" class="min-w-[2.25rem] px-2 py-1 rounded-md border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50">${esc(pageLabel(page))}</button>`
   ).join('');
-  $id('q-prev').onclick = () => showQuestionPage(qIndex - 1, { resumeTiming: !marked });
+  $id('q-prev').onclick = () => showQuestionPage(pageIndex - 1);
   $id('q-next').onclick = () => {
-    if (qIndex >= QUESTIONS.length - 1) {
+    if (pageIndex >= PAGES.length - 1) {
       if (!marked) { $id('submit-area').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
       return;
     }
-    showQuestionPage(qIndex + 1, { resumeTiming: !marked });
+    showQuestionPage(pageIndex + 1);
   };
   $id('q-jump').onclick = e => {
-    const b = e.target.closest('button[data-qi]'); if (!b) return;
-    showQuestionPage(+b.dataset.qi, { resumeTiming: !marked });
+    const b = e.target.closest('button[data-pi]'); if (!b) return;
+    showQuestionPage(+b.dataset.pi);
   };
   const form = $id('quiz-form');
+  form.setAttribute('autocomplete', 'off');
   form.oninput = form.onchange = () => { if (!marked) { scheduleSave(); updateJumpButtons(); } };
 }
 
-/* ===================== ONE-QUESTION PAGER + TIMING ===================== */
+/* ===================== PAGE PAGER + TIMING ===================== */
 function flushQuestionTime() {
-  if (marked || !att || !timingOnQ || !timingStartedAt) return;
+  if (marked || !att || !timingOnPage || !timingStartedAt) return;
   const elapsed = Math.max(0, Date.now() - timingStartedAt);
   att.timings ||= {};
-  att.timings[timingOnQ] ||= { ms: 0 };
-  att.timings[timingOnQ].ms += elapsed;
-  timingOnQ = null;
+  att.timings[timingOnPage] ||= { ms: 0 };
+  att.timings[timingOnPage].ms += elapsed;
+  timingOnPage = null;
   timingStartedAt = 0;
 }
-function beginQuestionTime(qid) {
+function beginQuestionTime(key) {
   flushQuestionTime();
-  if (marked || !qid) return;
-  timingOnQ = qid;
+  if (marked || !key) return;
+  timingOnPage = key;
   timingStartedAt = Date.now();
 }
 function stopPaperTimer() {
@@ -2448,58 +2508,66 @@ function startPaperTimer() {
 function updatePaperTimerDisplay() {
   const el = $id('paper-timer');
   if (el) el.textContent = fmtDuration(paperElapsedMs());
-  const card = QUESTIONS[qIndex] && $id('card-' + QUESTIONS[qIndex].id);
-  if (card) {
-    const t = card.querySelector('.q-time');
-    if (t) t.textContent = fmtDuration(questionTimeMs(QUESTIONS[qIndex].id));
-  }
+  const page = PAGES[pageIndex];
+  if (!page) return;
+  const ms = pageTimeMs(pageKey(page));
+  page.forEach(q => {
+    const card = $id('card-' + q.id);
+    const t = card?.querySelector('.q-time');
+    if (t) t.textContent = fmtDuration(ms);
+  });
 }
 function updateJumpButtons() {
   const box = $id('q-jump'); if (!box) return;
-  box.querySelectorAll('button[data-qi]').forEach(btn => {
-    const i = +btn.dataset.qi, q = QUESTIONS[i];
+  box.querySelectorAll('button[data-pi]').forEach(btn => {
+    const i = +btn.dataset.pi, page = PAGES[i];
     btn.classList.remove('current', 'answered', 'missed', 'ok');
-    if (i === qIndex) btn.classList.add('current');
-    else if (marked && results[q.id]) {
-      const r = results[q.id];
-      btn.classList.add(r.awarded >= q.marks ? 'ok' : 'missed');
-    } else if (hasAnswer(q, att?.answers?.[q.id] || ( $id('card-' + q.id) ? captureAnswer(q, $id('card-' + q.id)) : null))) {
+    if (i === pageIndex) btn.classList.add('current');
+    else if (marked) {
+      const allOk = page.every(q => (results[q.id]?.awarded || 0) >= q.marks);
+      const anyMiss = page.some(q => (results[q.id]?.awarded || 0) < q.marks);
+      btn.classList.add(allOk ? 'ok' : anyMiss ? 'missed' : 'answered');
+    } else if (page.every(q => hasAnswer(q, att?.answers?.[q.id] || ($id('card-' + q.id) ? captureAnswer(q, $id('card-' + q.id)) : null)))) {
       btn.classList.add('answered');
     }
   });
 }
-function showQuestionPage(i, { resumeTiming = false } = {}) {
-  if (!QUESTIONS.length) return;
-  i = Math.max(0, Math.min(QUESTIONS.length - 1, i));
+function showQuestionPage(i) {
+  if (!PAGES.length) return;
+  i = Math.max(0, Math.min(PAGES.length - 1, i));
   if (!marked) {
     flushQuestionTime();
     persistAnswersSnapshot();
   }
-  qIndex = i;
-  if (att) att.qIndex = i;
-  QUESTIONS.forEach((q, idx) => {
+  pageIndex = i;
+  if (att) { att.pageIndex = i; att.qIndex = QUESTIONS.findIndex(q => q.id === PAGES[i][0].id); }
+  const page = PAGES[pageIndex];
+  const visible = new Set(page.map(q => q.id));
+  QUESTIONS.forEach(q => {
     const card = $id('card-' + q.id);
-    if (card) card.classList.toggle('q-hidden', idx !== qIndex);
+    if (card) card.classList.toggle('q-hidden', !visible.has(q.id));
   });
-  const q = QUESTIONS[qIndex], sec = sectionOf(q.sec);
+  const sec = sectionOf(page[0].sec);
   const banner = $id('sec-banner');
   if (banner && sec) {
     banner.innerHTML = `<div class="text-lg font-semibold text-slate-700">${esc(sec.title)} (${sec.marks} marks)</div>
       <p class="text-sm text-slate-500 mt-1">${esc(sec.desc)}</p>`;
   }
-  $id('q-pos').textContent = String(qIndex + 1);
+  $id('q-pos').textContent = String(pageIndex + 1);
   const prev = $id('q-prev'), next = $id('q-next'), hint = $id('q-page-hint');
-  if (prev) prev.disabled = qIndex === 0;
+  if (prev) prev.disabled = pageIndex === 0;
   if (next) {
-    next.textContent = qIndex >= QUESTIONS.length - 1 ? (marked ? 'End' : 'Review & submit') : 'Next →';
-    next.disabled = marked && qIndex >= QUESTIONS.length - 1;
+    next.textContent = pageIndex >= PAGES.length - 1 ? (marked ? 'End' : 'Review & submit') : 'Next →';
+    next.disabled = marked && pageIndex >= PAGES.length - 1;
   }
+  const label = pageLabel(page);
+  const ms = pageTimeMs(pageKey(page));
   if (hint) hint.textContent = marked
-    ? `Reviewing Q${q.id} · ${fmtDuration(questionTimeMs(q.id))} spent`
-    : `Q${q.id} · time on this question ${fmtDuration(questionTimeMs(q.id))}`;
+    ? `Reviewing ${label} · ${fmtDuration(ms)} spent`
+    : `${label}${page.length > 1 ? ' (parts on one page)' : ''} · ${fmtDuration(ms)}`;
   updateJumpButtons();
   updatePaperTimerDisplay();
-  if (!marked) beginQuestionTime(q.id);
+  if (!marked) beginQuestionTime(pageKey(page));
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -2668,7 +2736,8 @@ function persistAnswersSnapshot() {
   const answers = {};
   QUESTIONS.forEach(q => { const card = $id('card-' + q.id); if (card) answers[q.id] = captureAnswer(q, card); });
   att.answers = answers;
-  att.qIndex = qIndex;
+  att.pageIndex = pageIndex;
+  att.qIndex = QUESTIONS.findIndex(q => q.id === PAGES[pageIndex]?.[0]?.id);
   if (!marked) att.status = QUESTIONS.some(q => hasAnswer(q, answers[q.id])) ? 'in-progress' : (att.status === 'in-progress' ? 'in-progress' : 'new');
   if (!marked && !att.startedAt) att.startedAt = Date.now();
   att.updated = Date.now();
@@ -2679,10 +2748,10 @@ function persistAnswersSnapshot() {
 function saveAnswers() {
   if (!TEST || !att) return;
   clearTimeout(saveTimer);
-  const resumeQ = !marked ? (timingOnQ || QUESTIONS[qIndex]?.id) : null;
+  const resumeKey = !marked ? (timingOnPage || (PAGES[pageIndex] && pageKey(PAGES[pageIndex]))) : null;
   flushQuestionTime();
   persistAnswersSnapshot();
-  if (resumeQ) beginQuestionTime(resumeQ);
+  if (resumeKey) beginQuestionTime(resumeKey);
 }
 
 /* ===================== MARKING ===================== */
@@ -2863,11 +2932,13 @@ function updateSummary(status) {
   $id('section-scores').innerHTML = TEST.sections.map(s => `<span class="bg-white border border-blue-100 rounded-lg px-3 py-1">${esc(secLabel(s))}: <b>${secGot[s.id]}</b> / ${secMax[s.id]}</span>`).join('');
   const timeEl = $id('time-summary');
   if (timeEl) {
-    const ranked = QUESTIONS.map(q => ({ id: q.id, ms: questionTimeMs(q.id), awarded: results[q.id]?.awarded || 0, marks: q.marks }))
-      .filter(x => x.ms > 0)
-      .sort((a, b) => b.ms - a.ms);
-    const slow = ranked.slice(0, 5).map(x => `Q${x.id} ${fmtDuration(x.ms)}${x.awarded < x.marks ? '*' : ''}`).join(' · ');
-    timeEl.innerHTML = `Total time <b>${fmtDuration(paperElapsedMs())}</b> (tracked on questions ${fmtDuration(totalTrackedMs())})`
+    const ranked = PAGES.map(p => {
+      const awarded = p.reduce((s, q) => s + (results[q.id]?.awarded || 0), 0);
+      const marks = p.reduce((s, q) => s + q.marks, 0);
+      return { label: pageLabel(p), ms: pageTimeMs(pageKey(p)), awarded, marks };
+    }).filter(x => x.ms > 0).sort((a, b) => b.ms - a.ms);
+    const slow = ranked.slice(0, 5).map(x => `${x.label} ${fmtDuration(x.ms)}${x.awarded < x.marks ? '*' : ''}`).join(' · ');
+    timeEl.innerHTML = `Total time <b>${fmtDuration(paperElapsedMs())}</b> (tracked on pages ${fmtDuration(totalTrackedMs())})`
       + (slow ? `<br><span class="text-slate-500">Longest: ${slow}${ranked.some(x => x.awarded < x.marks) ? ' · * marks lost' : ''}</span>` : '');
   }
   if (status !== undefined) { $id('marking-status').textContent = status; if (att) att.markingStatus = status; }
@@ -2907,7 +2978,7 @@ function showMarkedState(fresh) {
   if (TEST.notes?.length) { notes.classList.remove('hidden'); notes.querySelector('ul').innerHTML = TEST.notes.map(n => `<li>${esc(n)}</li>`).join(''); } else notes.classList.add('hidden');
   if (aiOverall) { const box = $id('api-overall'); box.textContent = aiOverall; box.style.whiteSpace = 'pre-wrap'; box.classList.remove('hidden'); }
   $id('results-card').classList.remove('hidden');
-  showQuestionPage(Math.min(qIndex, QUESTIONS.length - 1), { resumeTiming: false });
+  showQuestionPage(Math.min(pageIndex, PAGES.length - 1));
   if (!fresh) {
     updateSummary(att.markingStatus || 'Marked.');
     if (!att.aiDone && MARKING_API.url) $id('retry-ai').classList.remove('hidden');
@@ -3254,9 +3325,9 @@ function addMsg(role, text, opts = {}) {
   return wrap;
 }
 function focusQuestion(id) {
-  const i = QUESTIONS.findIndex(q => q.id === id);
+  const i = PAGES.findIndex(p => p.some(q => q.id === id));
   if (i < 0) return;
-  showQuestionPage(i, { resumeTiming: !marked });
+  showQuestionPage(i);
   const card = $id('card-' + id); if (!card) return;
   card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
   setTimeout(() => card.classList.remove('flash'), 2700);
@@ -3375,13 +3446,15 @@ function downloadMarkedPdf() {
   pdfHeader(w, 'Marked Paper');
   w.text(`Marking: ${$id('marking-status').textContent}`, { size: 8.5, color: C.grey, after: 2 });
   if (aiOverall) { w.text('Overall feedback', { size: 11, bold: true, after: 0.5 }); w.text(aiOverall, { size: 10, after: 2 }); }
-  w.text('Time by question (slowest first)', { size: 11, bold: true, after: 0.5 });
-  QUESTIONS.map(q => ({ q, ms: questionTimeMs(q.id), r: results[q.id] || {} }))
-    .sort((a, b) => b.ms - a.ms)
-    .forEach(({ q, ms, r }) => {
-      w.fit(10);
-      w.text(`Q${q.id}: ${fmtDuration(ms)}  ·  ${r.awarded ?? 0}/${q.marks} marks`, { size: 9, after: 0.4 });
-    });
+  w.text('Time by screen (slowest first; multi-part questions share a screen)', { size: 11, bold: true, after: 0.5 });
+  PAGES.map(p => {
+    const awarded = p.reduce((s, q) => s + (results[q.id]?.awarded || 0), 0);
+    const marks = p.reduce((s, q) => s + q.marks, 0);
+    return { label: pageLabel(p), ms: pageTimeMs(pageKey(p)), awarded, marks };
+  }).sort((a, b) => b.ms - a.ms).forEach(x => {
+    w.fit(10);
+    w.text(`${x.label}: ${fmtDuration(x.ms)}  ·  ${x.awarded}/${x.marks} marks`, { size: 9, after: 0.4 });
+  });
   w.rule();
   for (const sec of TEST.sections) {
     w.fit(30); w.space(3);
@@ -3441,14 +3514,16 @@ function downloadProgressPdf() {
       if (totalMs) w.text(`Total time: ${fmtDuration(totalMs)}`, { size: 9, color: C.grey, after: 0.3 });
       const lost = t.questions.filter(q => (a.results?.[q.id]?.awarded || 0) < q.marks);
       if (lost.length) w.text(`Marks lost on: ${lost.map(q => 'Q' + q.id).join(', ')}`, { size: 9, color: C.grey, after: 0.3 });
-      const slow = t.questions
-        .map(q => ({ id: q.id, ms: a.timings?.[q.id]?.ms || 0, lost: (a.results?.[q.id]?.awarded || 0) < q.marks }))
-        .filter(x => x.ms > 0)
-        .sort((x, y) => y.ms - x.ms)
-        .slice(0, 8);
+      const pages = buildPages(t.questions);
+      const slow = pages.map(p => {
+        const key = pageKey(p);
+        const ms = a.timings?.[key]?.ms || p.reduce((s, q) => s + (a.timings?.[q.id]?.ms || 0), 0);
+        const lost = p.some(q => (a.results?.[q.id]?.awarded || 0) < q.marks);
+        return { label: pageLabel(p), ms, lost };
+      }).filter(x => x.ms > 0).sort((x, y) => y.ms - x.ms).slice(0, 8);
       if (slow.length) {
-        w.text('Time per question (longest first):', { size: 9, bold: true, after: 0.3 });
-        slow.forEach(x => w.text(`  Q${x.id}: ${fmtDuration(x.ms)}${x.lost ? ' (marks lost)' : ''}`, { size: 9, color: C.grey, after: 0.2 }));
+        w.text('Time per screen (longest first):', { size: 9, bold: true, after: 0.3 });
+        slow.forEach(x => w.text(`  ${x.label}: ${fmtDuration(x.ms)}${x.lost ? ' (marks lost)' : ''}`, { size: 9, color: C.grey, after: 0.2 }));
       }
       const asked = (a.chatLog || []).filter(m => m.role === 'Student').length;
       if (asked) w.text(`Asked Maths Buddy ${asked} question${asked > 1 ? 's' : ''}.`, { size: 9, color: C.grey, after: 0.3 });
@@ -3471,7 +3546,7 @@ document.addEventListener('visibilitychange', () => {
     saveAnswers();
     stopPaperTimer();
   } else {
-    if (QUESTIONS[qIndex]) beginQuestionTime(QUESTIONS[qIndex].id);
+    if (PAGES[pageIndex]) beginQuestionTime(pageKey(PAGES[pageIndex]));
     startPaperTimer();
   }
 });

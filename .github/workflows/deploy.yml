@@ -1,4 +1,9 @@
-name: Deploy Processed Files to Main Branch Root
+name: Deploy site with Gemini key
+
+# Injects GEMINI_API_KEY into config.js for the Pages deployment only.
+# The key is NOT committed back to git (GitHub push protection blocks that).
+#
+# One-time setup: Settings → Pages → Build and deployment → Source = GitHub Actions
 
 on:
   push:
@@ -6,18 +11,25 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
 jobs:
-  build-and-deploy:
+  deploy:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          fetch-depth: 0
 
       - name: Inject API Key into config.js
         env:
@@ -26,7 +38,7 @@ jobs:
           if [ -z "${GEMINI_API_KEY}" ]; then
             echo "::error::Repository secret GEMINI_API_KEY is missing or empty."
             echo "Add it under Settings → Secrets and variables → Actions,"
-            echo "then re-run this workflow (Actions → Deploy Processed Files → Run workflow)."
+            echo "then re-run this workflow."
             exit 1
           fi
 
@@ -36,22 +48,21 @@ jobs:
           if not key:
               raise SystemExit("GEMINI_API_KEY is empty after strip")
           pathlib.Path("config.js").write_text(
-              "// config.js — injected by GitHub Actions from secret GEMINI_API_KEY\n"
+              "// config.js — injected at deploy time from secret GEMINI_API_KEY (not stored in git)\n"
               f"const geminiAPIKey = {json.dumps(key)};\n",
               encoding="utf-8",
           )
-          print("Wrote config.js with a non-empty Gemini API key.")
+          print("Wrote config.js with a non-empty Gemini API key for Pages artifact.")
           PY
 
-      - name: Commit and Push changes
-        run: |
-          git config --global user.name 'github-actions[bot]'
-          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
 
-          if ! git diff --quiet HEAD -- config.js; then
-            git add config.js
-            git commit -m "Inject API key into config.js [skip ci]"
-            git push origin main
-          else
-            echo "config.js already up to date."
-          fi
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
