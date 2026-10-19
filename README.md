@@ -2,20 +2,21 @@
 
 Interactive 2025 End-of-Year Primary 4 maths practice papers with local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
 
-## Setup
+## Gemini API key (required for AI marking / Maths Buddy)
 
-1. Repository secret `GEMINI_API_KEY` must be set (already configured for this repo).
-2. On each push to `main`, `.github/workflows/deploy.yml` injects the key into `config.js`.
-3. Enable **GitHub Pages** from the `main` branch root (`/`) so the site is served at `https://imbuenoing.github.io/p4-math/`.
+The live site reads the key from `config.js`. That file is filled by GitHub Actions from the repository secret **`GEMINI_API_KEY`**.
 
-## Local preview
+1. Open [Settings → Secrets and variables → Actions](https://github.com/imBuenoing/p4-math/settings/secrets/actions)
+2. Create or update secret **`GEMINI_API_KEY`** with your Google AI Studio / Gemini API key
+3. Re-run **Actions → Deploy Processed Files to Main Branch Root → Run workflow** (or push any commit to `main`)
 
-```bash
-python3 -m http.server 8080
-# open http://localhost:8080
-```
+If the secret is missing or empty, the deploy workflow fails on purpose instead of publishing a blank key.
 
-Optional: put a real key in `config.js` locally to try Gemini marking/chat. Leave the placeholder to use local marks only.
+Local preview: put a real key in `config.js`, or leave the placeholder to use local marks only.
+
+## Pages
+
+Enable **GitHub Pages** from the `main` branch root (`/`) → `https://imbuenoing.github.io/p4-math/`
 
 ## Access PIN
 
