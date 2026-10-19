@@ -1,6 +1,8 @@
 # P4 Maths Practice Papers
 
-Interactive 2025 End-of-Year Primary 4 maths practice papers with local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
+Interactive 2025 End-of-Year Primary 4 maths practice papers with **one question per page**, per-question timing for reports, local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
+
+While a paper is open, a background elapsed timer runs from the moment it starts. Time spent on each question is saved and included in the results summary, marked-paper PDF, and progress report.
 
 ## Setup
 

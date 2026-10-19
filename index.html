@@ -56,6 +56,11 @@
   #review-links>div:last-child{display:flex;flex-wrap:wrap;justify-content:center;gap:.375rem}
   .bar{height:.5rem;border-radius:999px;background:#e2e8f0;overflow:hidden}
   .bar>span{display:block;height:100%;border-radius:999px}
+  .qcard.q-hidden{display:none}
+  #q-jump button.answered{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
+  #q-jump button.current{background:#2563eb;border-color:#2563eb;color:#fff}
+  #q-jump button.missed{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
+  #q-jump button.ok{background:#f0fdf4;border-color:#86efac;color:#15803d}
 </style>
 </head>
 <body class="chat-hidden bg-slate-100 text-slate-800 min-h-screen py-8 px-4">
@@ -113,24 +118,18 @@
     <button type="button" onclick="goHome()" class="text-sm font-medium text-blue-700 hover:bg-blue-50 border border-blue-200 rounded-lg px-3 py-1.5">← All papers</button>
     <span id="save-status" class="text-xs text-slate-400"></span>
   </div>
-  <header class="text-center border-b pb-6 mb-8">
+  <header class="text-center border-b pb-6 mb-6">
     <h1 id="test-title" class="text-3xl font-bold text-blue-600"></h1>
     <p id="test-sub" class="text-slate-500 mt-2"></p>
     <p id="test-student" class="text-sm text-slate-600 mt-2"></p>
+    <p id="paper-timer-line" class="mt-3 text-sm text-slate-500">Elapsed <span id="paper-timer" class="font-mono font-semibold text-slate-700">0:00</span> · Question <span id="q-pos" class="font-semibold text-slate-700">1</span> of <span id="q-total">0</span></p>
   </header>
 
-  <form id="quiz-form" onsubmit="return false">
-    <div id="sections"></div>
-    <div id="submit-area" class="text-center pt-6 border-t">
-      <button type="button" id="submit-btn" onclick="openPin()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-xl shadow-lg transition">🔒 Submit &amp; Mark My Test</button>
-      <p class="text-xs text-slate-400 mt-2">Your answers are saved as you go. A parent or teacher PIN is needed to mark the test.</p>
-    </div>
-  </form>
-
-  <div id="results-card" class="hidden mt-8 p-6 rounded-xl bg-blue-50 border border-blue-200 text-center">
+  <div id="results-card" class="hidden mb-8 p-6 rounded-xl bg-blue-50 border border-blue-200 text-center">
     <h3 class="text-2xl font-bold text-blue-800 mb-1">Test Results</h3>
     <p id="score-display" class="text-4xl font-bold text-slate-800 my-3"></p>
     <div id="section-scores" class="flex flex-wrap justify-center gap-3 text-sm mb-3"></div>
+    <p id="time-summary" class="text-sm text-slate-600 mb-3"></p>
     <p id="marking-status" class="text-sm text-slate-500 mb-3"></p>
     <button id="retry-ai" type="button" onclick="retryAiMarking()" class="hidden mb-4 bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium">↻ Try Gemini feedback again</button>
     <div class="flex flex-wrap justify-center gap-2 mb-4">
@@ -148,6 +147,14 @@
       <button type="button" onclick="retakeTest()" class="bg-slate-600 hover:bg-slate-700 text-white px-6 py-2 rounded-lg font-medium">Retake this paper</button>
     </div>
   </div>
+
+  <form id="quiz-form" onsubmit="return false">
+    <div id="sections"></div>
+    <div id="submit-area" class="text-center pt-6 border-t mt-6">
+      <button type="button" id="submit-btn" onclick="openPin()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold px-8 py-3 rounded-xl shadow-lg transition">🔒 Submit &amp; Mark My Test</button>
+      <p class="text-xs text-slate-400 mt-2">One question per page. A parent or teacher PIN is needed to mark the test.</p>
+    </div>
+  </form>
 </main>
 
 <aside id="chat" aria-label="Maths Buddy chat">
@@ -2155,15 +2162,41 @@ function saveStore() {
   catch (_) { storageOK = false; }
   const w = $id('storage-warning'); if (w) w.classList.toggle('hidden', storageOK);
 }
-const attemptFor = id => (store.attempts[id] ||= { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: [] });
+const attemptFor = id => (store.attempts[id] ||= {
+  status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: [],
+  timings: {}, startedAt: null, finishedAt: null, qIndex: 0
+});
 
 /* ===================== CURRENT TEST STATE ===================== */
 let TEST = null, QUESTIONS = [], att = null;
 let marked = false, results = {}, pinPassed = false, aiOverall = '', submittedAt = null;
 let chatLog = [], chatHistory = [], chatBusy = false, activeQ = null;
+let qIndex = 0, timingOnQ = null, timingStartedAt = 0, paperTimerHandle = null;
 const qById = id => QUESTIONS.find(q => q.id === id);
 const sectionOf = id => TEST.sections.find(s => s.id === id);
 const maxMarks = t => t.questions.reduce((s, q) => s + q.marks, 0);
+function fmtDuration(ms) {
+  const s = Math.max(0, Math.round((ms || 0) / 1000));
+  const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), sec = s % 60;
+  if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+function questionTimeMs(qid) {
+  const base = att?.timings?.[qid]?.ms || 0;
+  if (!marked && timingOnQ === qid && timingStartedAt) return base + Math.max(0, Date.now() - timingStartedAt);
+  return base;
+}
+function totalTrackedMs() {
+  if (!att) return 0;
+  let sum = 0;
+  QUESTIONS.forEach(q => { sum += questionTimeMs(q.id); });
+  return sum;
+}
+function paperElapsedMs() {
+  if (!att?.startedAt) return 0;
+  const end = marked ? (att.finishedAt || att.submittedAt || Date.now()) : Date.now();
+  return Math.max(0, end - att.startedAt);
+}
 
 /* ===================== LANDING PAGE ===================== */
 function fmtShortDate(ts) { return ts ? new Date(ts).toLocaleDateString('en-SG', { day: 'numeric', month: 'short', year: 'numeric' }) : ''; }
@@ -2210,7 +2243,8 @@ $id('student-name').addEventListener('input', e => { store.name = e.target.value
 
 function goHome() {
   if (!hasAccess()) { showAccessGate(); return; }
-  if (TEST && !marked) saveAnswers();
+  if (TEST && !marked) { flushQuestionTime(); saveAnswers(); }
+  stopPaperTimer(); timingOnQ = null;
   TEST = null; closeChat(); document.body.classList.add('chat-hidden');
   $id('test-view').classList.add('hidden'); $id('landing').classList.remove('hidden');
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -2222,7 +2256,7 @@ function retakeTest(id) {
   const t = TESTS.find(x => x.id === id), a = store.attempts[id];
   if (a?.status === 'marked' && !confirm(`Retake ${t.short}? Your answers, marks and chat for this paper will be cleared (the score ${scoreOf(a)}/${maxMarks(t)} is kept in the history). Download the PDFs first if you want to keep them.`)) return;
   const hist = (a?.history || []).concat(a?.status === 'marked' ? [{ score: scoreOf(a), max: maxMarks(t), at: a.submittedAt }] : []);
-  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist };
+  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist, timings: {}, startedAt: null, finishedAt: null, qIndex: 0 };
   saveStore();
   openTest(id);
 }
@@ -2231,7 +2265,10 @@ function retakeTest(id) {
 function openTest(id) {
   if (!hasAccess()) { showAccessGate(); return; }
   const t = TESTS.find(x => x.id === id); if (!t) return goHome();
+  stopPaperTimer(); timingOnQ = null;
   TEST = t; QUESTIONS = t.questions; att = attemptFor(id);
+  att.timings ||= {};
+  QUESTIONS.forEach(q => { att.timings[q.id] ||= { ms: 0 }; });
   marked = att.status === 'marked'; pinPassed = false;
   results = att.results || {}; aiOverall = att.aiOverall || ''; submittedAt = att.submittedAt ? new Date(att.submittedAt) : null;
   chatLog = att.chatLog ||= []; chatHistory = att.chatHistory ||= []; activeQ = null;
@@ -2241,15 +2278,24 @@ function openTest(id) {
   $id('test-sub').textContent = `Primary 4 Mathematics · ${t.exam} · Total marks: ${maxMarks(t)}`;
   $id('test-student').textContent = store.name ? `Student: ${store.name}` : '';
   $id('save-status').textContent = '';
+  $id('q-total').textContent = String(QUESTIONS.length);
   history.replaceState(null, '', '#paper=' + id);
+
+  if (!marked && !att.startedAt) att.startedAt = Date.now();
 
   renderQuiz();
   restoreAnswers(att.answers || {});
   resetChat();
   $id('results-card').classList.add('hidden'); $id('api-overall').classList.add('hidden'); $id('retry-ai').classList.add('hidden');
+  const ts = $id('time-summary'); if (ts) ts.textContent = '';
   const btn = $id('submit-btn'); btn.disabled = false; btn.classList.remove('opacity-50');
-  $id('submit-area').classList.remove('hidden');
+  $id('submit-area').classList.toggle('hidden', false);
   document.body.classList.add('chat-hidden');
+
+  qIndex = Math.min(Math.max(0, att.qIndex || 0), QUESTIONS.length - 1);
+  showQuestionPage(qIndex, { resumeTiming: !marked });
+  if (!marked) startPaperTimer();
+  else updatePaperTimerDisplay();
 
   if (marked) showMarkedState(false);
   window.scrollTo(0, 0);
@@ -2308,26 +2354,35 @@ function inputHTML(q) {
 
 function renderQuiz() {
   const box = $id('sections');
-  box.innerHTML = TEST.sections.map(s => `
-    <section class="mb-10">
-      <h2 class="text-2xl font-semibold text-slate-700 mb-2 border-b pb-2">${s.title} (${s.marks} marks)</h2>
-      <p class="text-sm text-slate-500 mb-6">${s.desc}</p>
-      <div id="section-${s.id}" class="space-y-6"></div>
-    </section>`).join('');
+  box.innerHTML = `
+    <div id="sec-banner" class="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200"></div>
+    <div id="q-stage"></div>
+    <div class="mt-5 flex flex-wrap items-center justify-between gap-3">
+      <button type="button" id="q-prev" class="px-4 py-2 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 font-medium">← Previous</button>
+      <span id="q-page-hint" class="text-sm text-slate-500"></span>
+      <button type="button" id="q-next" class="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-medium">Next →</button>
+    </div>
+    <div class="mt-4">
+      <p class="text-xs text-slate-500 mb-2">Jump to question</p>
+      <div id="q-jump" class="flex flex-wrap gap-1.5"></div>
+    </div>`;
+  const stage = $id('q-stage');
   QUESTIONS.forEach(q => {
-    const sbox = $id('section-' + q.sec), sec = sectionOf(q.sec);
-    if (q.pre) sbox.insertAdjacentHTML('beforeend', `<div class="p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">${q.pre}${q.preFig || ''}</div>`);
+    const sec = sectionOf(q.sec);
+    const preHTML = q.pre ? `<div class="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">${q.pre}${q.preFig || ''}</div>` : '';
     const workBox = sec.work === 'none' ? '' : `
       <details class="mt-3" ${sec.work === 'open' ? 'open' : ''}>
         <summary class="text-sm text-slate-500 cursor-pointer select-none">My working${sec.work === 'optional' ? ' (optional)' : ''}</summary>
         <textarea data-role="work" rows="${sec.work === 'open' ? 4 : 2}" class="inp w-full mt-2 text-sm font-mono" placeholder="Show your steps here…"></textarea>
       </details>`;
     const figHTML = q.fig ? `<div data-role="figwrap">${q.fig}</div>${q.figAlt ? `<button type="button" class="prot-btn text-sm font-medium px-3 py-1 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50" data-on="0">📐 Show protractor</button>` : ''}` : '';
-    sbox.insertAdjacentHTML('beforeend', `
-      <div class="qcard bg-white p-5 rounded-xl border border-slate-200 shadow-sm" id="card-${q.id}" data-qid="${q.id}">
+    stage.insertAdjacentHTML('beforeend', `
+      <div class="qcard q-hidden bg-white p-5 rounded-xl border border-slate-200 shadow-sm" id="card-${q.id}" data-qid="${q.id}">
+        ${preHTML}
         <div class="flex justify-between items-start gap-3">
           <div class="font-medium text-slate-800 min-w-0">Q${q.id.replace(/[ab]$/, '')}. ${q.q}${marksLabel(q)}</div>
           <div class="flex items-center gap-2 shrink-0">
+            <span class="q-time text-xs font-mono text-slate-400" title="Time on this question"></span>
             <button type="button" class="ask-btn hidden text-sm font-medium px-2 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 hover:bg-blue-100" onclick="askAbout('${q.id}')">💬 Ask</button>
             <span class="badge hidden shrink-0 text-sm font-bold px-2 py-1 rounded-lg"></span>
           </div>
@@ -2347,9 +2402,105 @@ function renderQuiz() {
       pb.textContent = on ? '📐 Hide protractor' : '📐 Show protractor';
     });
   });
-  // autosave
+  $id('q-jump').innerHTML = QUESTIONS.map((q, i) =>
+    `<button type="button" data-qi="${i}" class="min-w-[2.25rem] px-2 py-1 rounded-md border border-slate-300 text-sm font-medium text-slate-700 hover:bg-slate-50">Q${q.id}</button>`
+  ).join('');
+  $id('q-prev').onclick = () => showQuestionPage(qIndex - 1, { resumeTiming: !marked });
+  $id('q-next').onclick = () => {
+    if (qIndex >= QUESTIONS.length - 1) {
+      if (!marked) { $id('submit-area').scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+      return;
+    }
+    showQuestionPage(qIndex + 1, { resumeTiming: !marked });
+  };
+  $id('q-jump').onclick = e => {
+    const b = e.target.closest('button[data-qi]'); if (!b) return;
+    showQuestionPage(+b.dataset.qi, { resumeTiming: !marked });
+  };
   const form = $id('quiz-form');
-  form.oninput = form.onchange = () => { if (!marked) scheduleSave(); };
+  form.oninput = form.onchange = () => { if (!marked) { scheduleSave(); updateJumpButtons(); } };
+}
+
+/* ===================== ONE-QUESTION PAGER + TIMING ===================== */
+function flushQuestionTime() {
+  if (marked || !att || !timingOnQ || !timingStartedAt) return;
+  const elapsed = Math.max(0, Date.now() - timingStartedAt);
+  att.timings ||= {};
+  att.timings[timingOnQ] ||= { ms: 0 };
+  att.timings[timingOnQ].ms += elapsed;
+  timingOnQ = null;
+  timingStartedAt = 0;
+}
+function beginQuestionTime(qid) {
+  flushQuestionTime();
+  if (marked || !qid) return;
+  timingOnQ = qid;
+  timingStartedAt = Date.now();
+}
+function stopPaperTimer() {
+  if (paperTimerHandle) { clearInterval(paperTimerHandle); paperTimerHandle = null; }
+}
+function startPaperTimer() {
+  stopPaperTimer();
+  updatePaperTimerDisplay();
+  paperTimerHandle = setInterval(updatePaperTimerDisplay, 1000);
+}
+function updatePaperTimerDisplay() {
+  const el = $id('paper-timer');
+  if (el) el.textContent = fmtDuration(paperElapsedMs());
+  const card = QUESTIONS[qIndex] && $id('card-' + QUESTIONS[qIndex].id);
+  if (card) {
+    const t = card.querySelector('.q-time');
+    if (t) t.textContent = fmtDuration(questionTimeMs(QUESTIONS[qIndex].id));
+  }
+}
+function updateJumpButtons() {
+  const box = $id('q-jump'); if (!box) return;
+  box.querySelectorAll('button[data-qi]').forEach(btn => {
+    const i = +btn.dataset.qi, q = QUESTIONS[i];
+    btn.classList.remove('current', 'answered', 'missed', 'ok');
+    if (i === qIndex) btn.classList.add('current');
+    else if (marked && results[q.id]) {
+      const r = results[q.id];
+      btn.classList.add(r.awarded >= q.marks ? 'ok' : 'missed');
+    } else if (hasAnswer(q, att?.answers?.[q.id] || ( $id('card-' + q.id) ? captureAnswer(q, $id('card-' + q.id)) : null))) {
+      btn.classList.add('answered');
+    }
+  });
+}
+function showQuestionPage(i, { resumeTiming = false } = {}) {
+  if (!QUESTIONS.length) return;
+  i = Math.max(0, Math.min(QUESTIONS.length - 1, i));
+  if (!marked) {
+    flushQuestionTime();
+    persistAnswersSnapshot();
+  }
+  qIndex = i;
+  if (att) att.qIndex = i;
+  QUESTIONS.forEach((q, idx) => {
+    const card = $id('card-' + q.id);
+    if (card) card.classList.toggle('q-hidden', idx !== qIndex);
+  });
+  const q = QUESTIONS[qIndex], sec = sectionOf(q.sec);
+  const banner = $id('sec-banner');
+  if (banner && sec) {
+    banner.innerHTML = `<div class="text-lg font-semibold text-slate-700">${esc(sec.title)} (${sec.marks} marks)</div>
+      <p class="text-sm text-slate-500 mt-1">${esc(sec.desc)}</p>`;
+  }
+  $id('q-pos').textContent = String(qIndex + 1);
+  const prev = $id('q-prev'), next = $id('q-next'), hint = $id('q-page-hint');
+  if (prev) prev.disabled = qIndex === 0;
+  if (next) {
+    next.textContent = qIndex >= QUESTIONS.length - 1 ? (marked ? 'End' : 'Review & submit') : 'Next →';
+    next.disabled = marked && qIndex >= QUESTIONS.length - 1;
+  }
+  if (hint) hint.textContent = marked
+    ? `Reviewing Q${q.id} · ${fmtDuration(questionTimeMs(q.id))} spent`
+    : `Q${q.id} · time on this question ${fmtDuration(questionTimeMs(q.id))}`;
+  updateJumpButtons();
+  updatePaperTimerDisplay();
+  if (!marked) beginQuestionTime(q.id);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderInteractive(q, card, reveal = false) {
@@ -2512,16 +2663,26 @@ function hasAnswer(q, v) {
 }
 let saveTimer = null;
 function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveAnswers, 400); }
-function saveAnswers() {
+function persistAnswersSnapshot() {
   if (!TEST || !att) return;
-  clearTimeout(saveTimer);
   const answers = {};
   QUESTIONS.forEach(q => { const card = $id('card-' + q.id); if (card) answers[q.id] = captureAnswer(q, card); });
   att.answers = answers;
+  att.qIndex = qIndex;
   if (!marked) att.status = QUESTIONS.some(q => hasAnswer(q, answers[q.id])) ? 'in-progress' : (att.status === 'in-progress' ? 'in-progress' : 'new');
+  if (!marked && !att.startedAt) att.startedAt = Date.now();
   att.updated = Date.now();
   saveStore();
   $id('save-status').textContent = storageOK ? `Saved ${new Date().toLocaleTimeString('en-SG', { hour: '2-digit', minute: '2-digit' })}` : 'Not saved (storage blocked)';
+  updateJumpButtons();
+}
+function saveAnswers() {
+  if (!TEST || !att) return;
+  clearTimeout(saveTimer);
+  const resumeQ = !marked ? (timingOnQ || QUESTIONS[qIndex]?.id) : null;
+  flushQuestionTime();
+  persistAnswersSnapshot();
+  if (resumeQ) beginQuestionTime(resumeQ);
 }
 
 /* ===================== MARKING ===================== */
@@ -2700,12 +2861,22 @@ function updateSummary(status) {
   const total = Object.values(secGot).reduce((a, b) => a + b, 0), max = Object.values(secMax).reduce((a, b) => a + b, 0);
   $id('score-display').textContent = `${total} / ${max}`;
   $id('section-scores').innerHTML = TEST.sections.map(s => `<span class="bg-white border border-blue-100 rounded-lg px-3 py-1">${esc(secLabel(s))}: <b>${secGot[s.id]}</b> / ${secMax[s.id]}</span>`).join('');
+  const timeEl = $id('time-summary');
+  if (timeEl) {
+    const ranked = QUESTIONS.map(q => ({ id: q.id, ms: questionTimeMs(q.id), awarded: results[q.id]?.awarded || 0, marks: q.marks }))
+      .filter(x => x.ms > 0)
+      .sort((a, b) => b.ms - a.ms);
+    const slow = ranked.slice(0, 5).map(x => `Q${x.id} ${fmtDuration(x.ms)}${x.awarded < x.marks ? '*' : ''}`).join(' · ');
+    timeEl.innerHTML = `Total time <b>${fmtDuration(paperElapsedMs())}</b> (tracked on questions ${fmtDuration(totalTrackedMs())})`
+      + (slow ? `<br><span class="text-slate-500">Longest: ${slow}${ranked.some(x => x.awarded < x.marks) ? ' · * marks lost' : ''}</span>` : '');
+  }
   if (status !== undefined) { $id('marking-status').textContent = status; if (att) att.markingStatus = status; }
   const missed = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks);
   $id('review-links').innerHTML = missed.length
     ? `<div class="font-medium text-slate-700 mb-2">Review these ${missed.length} question${missed.length > 1 ? 's' : ''}:</div><div class="flex flex-wrap justify-center gap-1.5">` +
       missed.map(q => { const r = results[q.id] || {}, part = (r.awarded || 0) > 0; return `<a href="#card-${q.id}" data-q="${q.id}" class="inline-block px-2 py-0.5 rounded-md border text-sm font-medium no-underline ${part ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100' : 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'}">Q${q.id}</a>`; }).join('') + `</div>`
     : '🎉 Full marks — well done!';
+  updateJumpButtons();
 }
 $id('review-links').addEventListener('click', e => { const a = e.target.closest('a[data-q]'); if (!a) return; e.preventDefault(); focusQuestion(a.dataset.q); });
 
@@ -2718,8 +2889,17 @@ function lockCards() {
 /* Shows a marked paper: from a fresh submit, or when reopening a saved one. */
 function showMarkedState(fresh) {
   marked = true;
+  flushQuestionTime();
+  stopPaperTimer();
+  updatePaperTimerDisplay();
   lockCards();
-  QUESTIONS.forEach(q => { const card = $id('card-' + q.id); if (results[q.id]) showFeedback(q, card, results[q.id]); });
+  QUESTIONS.forEach(q => {
+    const card = $id('card-' + q.id);
+    if (!card) return;
+    if (results[q.id]) showFeedback(q, card, results[q.id]);
+    const t = card.querySelector('.q-time');
+    if (t) t.textContent = fmtDuration(questionTimeMs(q.id));
+  });
   document.querySelectorAll('.ask-btn').forEach(b => b.classList.remove('hidden'));
   document.body.classList.remove('chat-hidden');
   setChatLocked(false);
@@ -2727,6 +2907,7 @@ function showMarkedState(fresh) {
   if (TEST.notes?.length) { notes.classList.remove('hidden'); notes.querySelector('ul').innerHTML = TEST.notes.map(n => `<li>${esc(n)}</li>`).join(''); } else notes.classList.add('hidden');
   if (aiOverall) { const box = $id('api-overall'); box.textContent = aiOverall; box.style.whiteSpace = 'pre-wrap'; box.classList.remove('hidden'); }
   $id('results-card').classList.remove('hidden');
+  showQuestionPage(Math.min(qIndex, QUESTIONS.length - 1), { resumeTiming: false });
   if (!fresh) {
     updateSummary(att.markingStatus || 'Marked.');
     if (!att.aiDone && MARKING_API.url) $id('retry-ai').classList.remove('hidden');
@@ -2837,11 +3018,15 @@ function resetAllData() {
 async function submitTest() {
   if (marked) return;
   if (!pinPassed) { openPin(); return; }
+  flushQuestionTime();
   saveAnswers();
   results = {};
   QUESTIONS.forEach(q => { const r = grade(q, $id('card-' + q.id)); r.autoAwarded = r.awarded; results[q.id] = r; });
   submittedAt = new Date(); aiOverall = '';
-  Object.assign(att, { status: 'marked', results, submittedAt: submittedAt.getTime(), aiOverall: '', aiDone: false });
+  Object.assign(att, {
+    status: 'marked', results, submittedAt: submittedAt.getTime(), finishedAt: Date.now(),
+    aiOverall: '', aiDone: false, timings: att.timings || {}
+  });
   saveStore();
   showMarkedState(true);
   addMsg('assistant', "Hi, I'm Maths Buddy! Your test has been marked. Press 💬 Ask next to any question, or type a question number like Q12, and I'll help you understand it.");
@@ -3069,8 +3254,10 @@ function addMsg(role, text, opts = {}) {
   return wrap;
 }
 function focusQuestion(id) {
+  const i = QUESTIONS.findIndex(q => q.id === id);
+  if (i < 0) return;
+  showQuestionPage(i, { resumeTiming: !marked });
   const card = $id('card-' + id); if (!card) return;
-  card.scrollIntoView({ behavior: 'smooth', block: isDesktop() ? 'center' : 'start' });
   card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
   setTimeout(() => card.classList.remove('flash'), 2700);
 }
@@ -3180,6 +3367,7 @@ function pdfHeader(w, heading) {
   QUESTIONS.forEach(q => { max[q.sec] += q.marks; got[q.sec] += results[q.id]?.awarded || 0; });
   w.text(`Score: ${Object.values(got).reduce((a, b) => a + b, 0)} / ${maxMarks(TEST)}`, { size: 14, bold: true, after: 0.5 });
   w.text(TEST.sections.map(s => `${secLabel(s)} ${got[s.id]}/${max[s.id]}`).join('    '), { size: 10, after: 1 });
+  w.text(`Total time: ${fmtDuration(paperElapsedMs())}   ·   Time on questions: ${fmtDuration(totalTrackedMs())}`, { size: 10, after: 1 });
 }
 function downloadMarkedPdf() {
   if (!marked) return;
@@ -3187,14 +3375,23 @@ function downloadMarkedPdf() {
   pdfHeader(w, 'Marked Paper');
   w.text(`Marking: ${$id('marking-status').textContent}`, { size: 8.5, color: C.grey, after: 2 });
   if (aiOverall) { w.text('Overall feedback', { size: 11, bold: true, after: 0.5 }); w.text(aiOverall, { size: 10, after: 2 }); }
+  w.text('Time by question (slowest first)', { size: 11, bold: true, after: 0.5 });
+  QUESTIONS.map(q => ({ q, ms: questionTimeMs(q.id), r: results[q.id] || {} }))
+    .sort((a, b) => b.ms - a.ms)
+    .forEach(({ q, ms, r }) => {
+      w.fit(10);
+      w.text(`Q${q.id}: ${fmtDuration(ms)}  ·  ${r.awarded ?? 0}/${q.marks} marks`, { size: 9, after: 0.4 });
+    });
+  w.rule();
   for (const sec of TEST.sections) {
     w.fit(30); w.space(3);
     w.text(sec.title, { size: 13, bold: true, color: C.blue, after: 0 }); w.rule();
     for (const q of QUESTIONS.filter(x => x.sec === sec.id)) {
       const r = results[q.id] || { awarded: 0 }, card = $id('card-' + q.id);
       const full = r.awarded === q.marks, none = r.awarded === 0, verdict = full ? 'correct' : none ? (r.given ? 'wrong' : 'not answered') : 'partly correct';
+      const qMs = questionTimeMs(q.id);
       w.fit(28);
-      w.text(`Q${q.id}    ${r.awarded} / ${q.marks}  (${verdict})`, { size: 11, bold: true, color: full ? C.green : none ? C.red : C.amber, after: 0.8 });
+      w.text(`Q${q.id}    ${r.awarded} / ${q.marks}  (${verdict})    time ${fmtDuration(qMs)}`, { size: 11, bold: true, color: full ? C.green : none ? C.red : C.amber, after: 0.8 });
       w.text(plain((q.pre ? q.pre + ' ' : '') + q.q), { size: 9.5, after: 0.8 });
       if (q.ctx) w.text('Figure: ' + q.ctx, { size: 8.5, color: C.grey, after: 0.8 }); else if (q.fig) w.text('(See the figure in the test.)', { size: 8.5, color: C.grey, after: 0.8 });
       if (q.type === 'mcq') w.text(q.opts.map((o, i) => `(${i + 1}) ${plain(o) || 'figure ' + (i + 1)}`).join('     '), { size: 9, color: C.grey, after: 1.5 });
@@ -3239,13 +3436,26 @@ function downloadProgressPdf() {
     w.text(t.school, { size: 11, bold: true, after: 0.3 });
     if (a?.status === 'marked') {
       const sc = scoreOf(a);
+      const totalMs = a.finishedAt && a.startedAt ? a.finishedAt - a.startedAt : Object.values(a.timings || {}).reduce((s, x) => s + (x.ms || 0), 0);
       w.text(`Score: ${sc} / ${max} (${Math.round(sc / max * 100)}%) - marked ${fmtDate(a.submittedAt)}`, { size: 10, color: C.green, after: 0.3 });
-      const lost = t.questions.filter(q => (a.results?.[q.id]?.awarded || 0) < q.marks).map(q => 'Q' + q.id);
-      if (lost.length) w.text(`Marks lost on: ${lost.join(', ')}`, { size: 9, color: C.grey, after: 0.3 });
+      if (totalMs) w.text(`Total time: ${fmtDuration(totalMs)}`, { size: 9, color: C.grey, after: 0.3 });
+      const lost = t.questions.filter(q => (a.results?.[q.id]?.awarded || 0) < q.marks);
+      if (lost.length) w.text(`Marks lost on: ${lost.map(q => 'Q' + q.id).join(', ')}`, { size: 9, color: C.grey, after: 0.3 });
+      const slow = t.questions
+        .map(q => ({ id: q.id, ms: a.timings?.[q.id]?.ms || 0, lost: (a.results?.[q.id]?.awarded || 0) < q.marks }))
+        .filter(x => x.ms > 0)
+        .sort((x, y) => y.ms - x.ms)
+        .slice(0, 8);
+      if (slow.length) {
+        w.text('Time per question (longest first):', { size: 9, bold: true, after: 0.3 });
+        slow.forEach(x => w.text(`  Q${x.id}: ${fmtDuration(x.ms)}${x.lost ? ' (marks lost)' : ''}`, { size: 9, color: C.grey, after: 0.2 }));
+      }
       const asked = (a.chatLog || []).filter(m => m.role === 'Student').length;
       if (asked) w.text(`Asked Maths Buddy ${asked} question${asked > 1 ? 's' : ''}.`, { size: 9, color: C.grey, after: 0.3 });
-    } else if (a?.status === 'in-progress') w.text(`In progress - ${answeredCount(t, a)}/${t.questions.length} questions answered`, { size: 10, color: C.amber, after: 0.3 });
-    else w.text('Not started', { size: 10, color: C.grey, after: 0.3 });
+    } else if (a?.status === 'in-progress') {
+      w.text(`In progress - ${answeredCount(t, a)}/${t.questions.length} questions answered`, { size: 10, color: C.amber, after: 0.3 });
+      if (a.startedAt) w.text(`Started ${fmtDate(a.startedAt)} · elapsed so far ${fmtDuration(Date.now() - a.startedAt)}`, { size: 9, color: C.grey, after: 0.3 });
+    } else w.text('Not started', { size: 10, color: C.grey, after: 0.3 });
     (a?.history || []).forEach(h => w.text(`Earlier attempt: ${h.score}/${h.max} (${fmtDate(h.at)})`, { size: 9, color: C.grey, after: 0.3 }));
     w.rule();
   });
@@ -3253,8 +3463,18 @@ function downloadProgressPdf() {
 }
 
 /* ===================== START ===================== */
-window.addEventListener('beforeunload', () => { if (TEST && !marked) saveAnswers(); });
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden' && TEST && !marked) saveAnswers(); });
+window.addEventListener('beforeunload', () => { if (TEST && !marked) { flushQuestionTime(); saveAnswers(); } });
+document.addEventListener('visibilitychange', () => {
+  if (!TEST || marked) return;
+  if (document.visibilityState === 'hidden') {
+    flushQuestionTime();
+    saveAnswers();
+    stopPaperTimer();
+  } else {
+    if (QUESTIONS[qIndex]) beginQuestionTime(QUESTIONS[qIndex].id);
+    startPaperTimer();
+  }
+});
 (function start() {
   if (!hasAccess()) { showAccessGate(); return; }
   $id('access-gate').classList.add('hidden');
