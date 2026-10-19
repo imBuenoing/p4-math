@@ -2695,10 +2695,13 @@ function buildTopicReport(test, results, timings) {
   const timeSinks = [];
   if (timings && Object.keys(timings).length) {
     questions.forEach(q => {
-      const ms = timingMsForQuestion(q.id, timings);
+      const parts = timingPartsForQuestion(q.id, timings);
+      const ms = parts.ms || timingMsForQuestion(q.id, timings);
       const r = results?.[q.id] || {};
-      if (ms >= 5 * 60 * 1000) timeSinks.push({ id: q.id, ms, blank: isUnansweredResult(q, r), kind: 'slow' });
-      if (ms > 0 && ms < 20 * 1000 && isUnansweredResult(q, r)) timeSinks.push({ id: q.id, ms, blank: true, kind: 'skipped' });
+      const extra = { attemptMs: parts.attemptMs, reviewMs: parts.reviewMs, visits: parts.visits, hasSplit: parts.hasSplit };
+      if (ms >= 5 * 60 * 1000) timeSinks.push({ id: q.id, ms, blank: isUnansweredResult(q, r), kind: 'slow', ...extra });
+      if (ms > 0 && ms < 20 * 1000 && isUnansweredResult(q, r)) timeSinks.push({ id: q.id, ms, blank: true, kind: 'skipped', ...extra });
+      else if (parts.visits >= 3) timeSinks.push({ id: q.id, ms, blank: isUnansweredResult(q, r), kind: 'revisits', ...extra });
     });
   }
 
@@ -2821,7 +2824,7 @@ const attemptFor = id => (store.attempts[id] ||= {
 let TEST = null, QUESTIONS = [], PAGES = [], att = null;
 let marked = false, results = {}, pinPassed = false, aiOverall = '', submittedAt = null;
 let chatLog = [], chatHistory = [], chatBusy = false, activeQ = null;
-let pageIndex = 0, timingOnPage = null, timingStartedAt = 0, paperTimerHandle = null;
+let pageIndex = 0, timingOnPage = null, timingStartedAt = 0, timingInReview = false, paperTimerHandle = null;
 const qById = id => QUESTIONS.find(q => q.id === id);
 const sectionOf = id => TEST.sections.find(s => s.id === id);
 const maxMarks = t => t.questions.reduce((s, q) => s + q.marks, 0);
@@ -2879,15 +2882,86 @@ function fmtDuration(ms) {
   if (h) return `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
   return `${m}:${String(sec).padStart(2, '0')}`;
 }
+function ensureTiming(slot) {
+  const t = slot && typeof slot === 'object' ? slot : { ms: 0 };
+  t.ms = t.ms || 0;
+  t.visits = t.visits || 0;
+  t.attemptMs = t.attemptMs || 0;
+  t.reviewMs = t.reviewMs || 0;
+  t.answered = !!t.answered;
+  return t;
+}
+function timingSlot(key) {
+  if (!att || !key) return ensureTiming(null);
+  att.timings ||= {};
+  return (att.timings[key] = ensureTiming(att.timings[key]));
+}
 function pageTimeMs(key) {
-  const base = att?.timings?.[key]?.ms || 0;
-  if (!marked && timingOnPage === key && timingStartedAt) return base + Math.max(0, Date.now() - timingStartedAt);
-  return base;
+  return timingParts(key).ms;
+}
+function timingParts(key) {
+  const slot = att?.timings?.[key] ? ensureTiming(att.timings[key]) : ensureTiming(null);
+  let ms = slot.ms, attemptMs = slot.attemptMs, reviewMs = slot.reviewMs;
+  if (!marked && timingOnPage === key && timingStartedAt) {
+    const live = Math.max(0, Date.now() - timingStartedAt);
+    ms += live;
+    if (timingInReview || slot.answered) reviewMs += live;
+    else attemptMs += live;
+  }
+  const hasSplit = attemptMs > 0 || reviewMs > 0 || slot.answered;
+  return { ms, attemptMs, reviewMs, visits: slot.visits, answered: slot.answered, hasSplit };
+}
+function timingPartsForQuestion(qid, timings) {
+  if (timings) {
+    let slot = timings[qid];
+    if (!slot) {
+      for (const [k, v] of Object.entries(timings)) {
+        if (k.split('+').includes(String(qid))) { slot = v; break; }
+      }
+    }
+    const t = ensureTiming(slot);
+    return { ms: t.ms, attemptMs: t.attemptMs, reviewMs: t.reviewMs, visits: t.visits, answered: t.answered, hasSplit: t.attemptMs > 0 || t.reviewMs > 0 || t.answered };
+  }
+  const page = pageOfQuestion(qid);
+  return timingParts(page ? pageKey(page) : qid);
+}
+function fmtTimingBreakdown(parts) {
+  if (!parts) return '';
+  let s = fmtDuration(parts.ms);
+  if (parts.hasSplit) {
+    s += ` (attempt ${fmtDuration(parts.attemptMs)}`;
+    if (parts.answered || parts.reviewMs > 0) s += `, review ${fmtDuration(parts.reviewMs)}`;
+    s += ')';
+  }
+  if (parts.visits > 1) s += ` · ${parts.visits} visits`;
+  return s;
 }
 function questionTimeMs(qid) {
   const page = pageOfQuestion(qid);
   if (page) return pageTimeMs(pageKey(page));
   return pageTimeMs(qid);
+}
+function pageIsFullyAnswered(page) {
+  if (!page?.length) return false;
+  return page.every(q => {
+    const card = $id('card-' + q.id);
+    const v = card ? captureAnswer(q, card) : att?.answers?.[q.id];
+    return hasAnswer(q, v);
+  });
+}
+/** When every part on the current screen first has an answer, bank attempt time and switch to review timing. */
+function notePageAnswerProgress() {
+  if (marked || !att || !timingOnPage || !PAGES[pageIndex]) return;
+  const page = PAGES[pageIndex];
+  const key = pageKey(page);
+  if (key !== timingOnPage) return;
+  const slot = timingSlot(key);
+  if (slot.answered) return;
+  if (!pageIsFullyAnswered(page)) return;
+  flushQuestionTime();
+  slot.answered = true;
+  slot.firstAnsweredAt = slot.firstAnsweredAt || Date.now();
+  beginQuestionTime(key, { countVisit: false });
 }
 function totalTrackedMs() {
   if (!att || !PAGES.length) return 0;
@@ -2944,8 +3018,12 @@ $id('student-name').addEventListener('input', e => { store.name = e.target.value
 
 function goHome() {
   if (!hasAccess()) { showAccessGate(); return; }
-  if (TEST && !marked) { flushQuestionTime(); saveAnswers(); }
-  stopPaperTimer(); timingOnPage = null;
+  if (TEST && !marked) {
+    notePageAnswerProgress();
+    flushQuestionTime();
+    persistAnswersSnapshot();
+  }
+  stopPaperTimer(); timingOnPage = null; timingStartedAt = 0; timingInReview = false;
   TEST = null; closeChat(); document.body.classList.add('chat-hidden');
   $id('test-view').classList.add('hidden'); $id('landing').classList.remove('hidden');
   if (location.hash) history.replaceState(null, '', location.pathname + location.search);
@@ -2969,7 +3047,7 @@ function openTest(id) {
   stopPaperTimer(); timingOnPage = null;
   TEST = t; QUESTIONS = t.questions; PAGES = buildPages(QUESTIONS); att = attemptFor(id);
   att.timings ||= {};
-  PAGES.forEach(p => { att.timings[pageKey(p)] ||= { ms: 0 }; });
+  PAGES.forEach(p => { timingSlot(pageKey(p)); });
   marked = att.status === 'marked'; pinPassed = false;
   results = att.results || {}; aiOverall = att.aiOverall || ''; submittedAt = att.submittedAt ? new Date(att.submittedAt) : null;
   chatLog = att.chatLog ||= []; chatHistory = att.chatHistory ||= []; activeQ = null;
@@ -3135,17 +3213,27 @@ function renderQuiz() {
 function flushQuestionTime() {
   if (marked || !att || !timingOnPage || !timingStartedAt) return;
   const elapsed = Math.max(0, Date.now() - timingStartedAt);
-  att.timings ||= {};
-  att.timings[timingOnPage] ||= { ms: 0 };
-  att.timings[timingOnPage].ms += elapsed;
+  const slot = timingSlot(timingOnPage);
+  slot.ms += elapsed;
+  if (timingInReview || slot.answered) slot.reviewMs += elapsed;
+  else slot.attemptMs += elapsed;
   timingOnPage = null;
   timingStartedAt = 0;
+  timingInReview = false;
 }
-function beginQuestionTime(key) {
+function beginQuestionTime(key, opts = {}) {
   flushQuestionTime();
   if (marked || !key) return;
+  const slot = timingSlot(key);
+  if (opts.countVisit) slot.visits += 1;
+  // Screen already fully answered (e.g. restored answers) → count as review
+  if (!slot.answered && PAGES[pageIndex] && pageKey(PAGES[pageIndex]) === key && pageIsFullyAnswered(PAGES[pageIndex])) {
+    slot.answered = true;
+    slot.firstAnsweredAt = slot.firstAnsweredAt || Date.now();
+  }
   timingOnPage = key;
   timingStartedAt = Date.now();
+  timingInReview = !!slot.answered;
 }
 function stopPaperTimer() {
   if (paperTimerHandle) { clearInterval(paperTimerHandle); paperTimerHandle = null; }
@@ -3160,11 +3248,17 @@ function updatePaperTimerDisplay() {
   if (el) el.textContent = fmtDuration(paperElapsedMs());
   const page = PAGES[pageIndex];
   if (!page) return;
-  const ms = pageTimeMs(pageKey(page));
+  const parts = timingParts(pageKey(page));
+  const label = fmtTimingBreakdown(parts);
   page.forEach(q => {
     const card = $id('card-' + q.id);
     const t = card?.querySelector('.q-time');
-    if (t) t.textContent = fmtDuration(ms);
+    if (t) {
+      t.textContent = label;
+      t.title = parts.hasSplit
+        ? `Total on this screen. Attempt = before an answer was entered; review = after (including double-checks).`
+        : 'Time on this screen';
+    }
   });
 }
 function updateJumpButtons() {
@@ -3185,7 +3279,11 @@ function updateJumpButtons() {
 function showQuestionPage(i) {
   if (!PAGES.length) return;
   i = Math.max(0, Math.min(PAGES.length - 1, i));
+  const nextPage = PAGES[i];
+  const nextKey = nextPage ? pageKey(nextPage) : null;
+  const sameScreen = !!(nextKey && timingOnPage === nextKey);
   if (!marked) {
+    notePageAnswerProgress();
     flushQuestionTime();
     persistAnswersSnapshot();
   }
@@ -3211,13 +3309,14 @@ function showQuestionPage(i) {
     next.disabled = marked && pageIndex >= PAGES.length - 1;
   }
   const label = pageLabel(page);
-  const ms = pageTimeMs(pageKey(page));
+  const key = pageKey(page);
+  const parts = timingParts(key);
   if (hint) hint.textContent = marked
-    ? `Reviewing ${label} · ${fmtDuration(ms)} spent`
-    : `${label}${page.length > 1 ? ' (parts on one page)' : ''} · ${fmtDuration(ms)}`;
+    ? `Reviewing ${label} · ${fmtTimingBreakdown(parts)} spent`
+    : `${label}${page.length > 1 ? ' (parts on one page)' : ''} · ${fmtTimingBreakdown(parts)}`;
   updateJumpButtons();
   updatePaperTimerDisplay();
-  if (!marked) beginQuestionTime(pageKey(page));
+  if (!marked) beginQuestionTime(key, { countVisit: !sameScreen });
   window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
@@ -3380,7 +3479,11 @@ function hasAnswer(q, v) {
   return Object.entries(v).some(([k, val]) => k !== 'work' && String(val || '').trim() !== '');
 }
 let saveTimer = null;
-function scheduleSave() { clearTimeout(saveTimer); saveTimer = setTimeout(saveAnswers, 400); }
+function scheduleSave() {
+  notePageAnswerProgress();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(saveAnswers, 400);
+}
 function persistAnswersSnapshot() {
   if (!TEST || !att) return;
   const answers = {};
@@ -3398,10 +3501,11 @@ function persistAnswersSnapshot() {
 function saveAnswers() {
   if (!TEST || !att) return;
   clearTimeout(saveTimer);
+  notePageAnswerProgress();
   const resumeKey = !marked ? (timingOnPage || (PAGES[pageIndex] && pageKey(PAGES[pageIndex]))) : null;
   flushQuestionTime();
   persistAnswersSnapshot();
-  if (resumeKey) beginQuestionTime(resumeKey);
+  if (resumeKey) beginQuestionTime(resumeKey, { countVisit: false });
 }
 
 /* ===================== MARKING ===================== */
@@ -3585,9 +3689,10 @@ function updateSummary(status) {
     const ranked = PAGES.map(p => {
       const awarded = p.reduce((s, q) => s + (results[q.id]?.awarded || 0), 0);
       const marks = p.reduce((s, q) => s + q.marks, 0);
-      return { label: pageLabel(p), ms: pageTimeMs(pageKey(p)), awarded, marks };
-    }).filter(x => x.ms > 0).sort((a, b) => b.ms - a.ms);
-    const slow = ranked.slice(0, 5).map(x => `${x.label} ${fmtDuration(x.ms)}${x.awarded < x.marks ? '*' : ''}`).join(' · ');
+      const parts = timingParts(pageKey(p));
+      return { label: pageLabel(p), parts, awarded, marks };
+    }).filter(x => x.parts.ms > 0).sort((a, b) => b.parts.ms - a.parts.ms);
+    const slow = ranked.slice(0, 5).map(x => `${x.label} ${fmtTimingBreakdown(x.parts)}${x.awarded < x.marks ? '*' : ''}`).join(' · ');
     timeEl.innerHTML = `Total time <b>${fmtDuration(paperElapsedMs())}</b> (tracked on pages ${fmtDuration(totalTrackedMs())})`
       + (slow ? `<br><span class="text-slate-500">Longest: ${slow}${ranked.some(x => x.awarded < x.marks) ? ' · * marks lost' : ''}</span>` : '');
   }
@@ -3620,7 +3725,7 @@ function showMarkedState(fresh) {
     if (!card) return;
     if (results[q.id]) showFeedback(q, card, results[q.id]);
     const t = card.querySelector('.q-time');
-    if (t) t.textContent = fmtDuration(questionTimeMs(q.id));
+    if (t) t.textContent = fmtTimingBreakdown(timingPartsForQuestion(q.id));
   });
   document.querySelectorAll('.ask-btn').forEach(b => b.classList.remove('hidden'));
   document.body.classList.remove('chat-hidden');
@@ -4160,7 +4265,12 @@ function renderTopicReportOnScreen() {
   if (report.timeSinks.length) {
     html += `<div><div class="font-semibold text-slate-700 mb-1">Time sinks</div><ul class="list-disc pl-5">`;
     report.timeSinks.slice(0, 6).forEach(s => {
-      html += `<li>Q${s.id}: ${fmtDuration(s.ms)}${s.kind === 'skipped' ? ' (skipped quickly, blank)' : s.blank ? ' (blank)' : ''}</li>`;
+      const split = s.hasSplit ? ` · attempt ${fmtDuration(s.attemptMs)}, review ${fmtDuration(s.reviewMs)}` : '';
+      const visits = s.visits > 1 ? ` · ${s.visits} visits` : '';
+      const why = s.kind === 'skipped' ? ' (skipped quickly, blank)'
+        : s.kind === 'revisits' ? ' (opened several times)'
+        : s.blank ? ' (blank)' : '';
+      html += `<li>Q${s.id}: ${fmtDuration(s.ms)}${split}${visits}${why}</li>`;
     });
     html += `</ul></div>`;
   }
@@ -4213,7 +4323,12 @@ function appendTopicReportToPdf(w) {
     w.space(1);
     w.text('Time sinks', { size: 11, bold: true, after: 0.5 });
     report.timeSinks.slice(0, 8).forEach(s => {
-      w.text(`• Q${s.id}: ${fmtDuration(s.ms)}${s.kind === 'skipped' ? ' — skipped in under 20 s and left blank' : s.blank ? ' — over 5 min and left blank' : ' — over 5 min'}`, { size: 9, after: 0.5 });
+      const split = s.hasSplit ? ` (attempt ${fmtDuration(s.attemptMs)}, review ${fmtDuration(s.reviewMs)})` : '';
+      const visits = s.visits > 1 ? ` · ${s.visits} visits` : '';
+      const why = s.kind === 'skipped' ? ' — skipped in under 20 s and left blank'
+        : s.kind === 'revisits' ? ' — opened several times'
+        : s.blank ? ' — over 5 min and left blank' : ' — over 5 min';
+      w.text(`• Q${s.id}: ${fmtDuration(s.ms)}${split}${visits}${why}`, { size: 9, after: 0.5 });
     });
   }
   w.space(1);
@@ -4249,13 +4364,15 @@ function downloadMarkedPdf() {
   w.text(`Marking: ${$id('marking-status').textContent}`, { size: 8.5, color: C.grey, after: 2 });
   if (aiOverall) { w.text('Overall feedback', { size: 11, bold: true, after: 0.5 }); w.text(aiOverall, { size: 10, after: 2 }); }
   w.text('Time by screen (slowest first; multi-part questions share a screen)', { size: 11, bold: true, after: 0.5 });
+  w.text('Attempt = time before an answer was entered on that screen; review = time after (including double-checks). Visits count each return to the screen.', { size: 8, color: C.grey, after: 1 });
   PAGES.map(p => {
     const awarded = p.reduce((s, q) => s + (results[q.id]?.awarded || 0), 0);
     const marks = p.reduce((s, q) => s + q.marks, 0);
-    return { label: pageLabel(p), ms: pageTimeMs(pageKey(p)), awarded, marks };
-  }).sort((a, b) => b.ms - a.ms).forEach(x => {
+    const parts = timingParts(pageKey(p));
+    return { label: pageLabel(p), parts, awarded, marks };
+  }).sort((a, b) => b.parts.ms - a.parts.ms).forEach(x => {
     w.fit(10);
-    w.text(`${x.label}: ${fmtDuration(x.ms)}  ·  ${x.awarded}/${x.marks} marks`, { size: 9, after: 0.4 });
+    w.text(`${x.label}: ${fmtTimingBreakdown(x.parts)}  ·  ${x.awarded}/${x.marks} marks`, { size: 9, after: 0.4 });
   });
   w.rule();
   for (const sec of TEST.sections) {
@@ -4264,9 +4381,9 @@ function downloadMarkedPdf() {
     for (const q of QUESTIONS.filter(x => x.sec === sec.id)) {
       const r = results[q.id] || { awarded: 0 }, card = $id('card-' + q.id);
       const full = r.awarded === q.marks, none = r.awarded === 0, verdict = full ? 'correct' : none ? (r.given ? 'wrong' : 'not answered') : 'partly correct';
-      const qMs = questionTimeMs(q.id);
+      const qParts = timingPartsForQuestion(q.id);
       w.fit(28);
-      w.text(`Q${q.id}    ${r.awarded} / ${q.marks}  (${verdict})    time ${fmtDuration(qMs)}`, { size: 11, bold: true, color: full ? C.green : none ? C.red : C.amber, after: 0.8 });
+      w.text(`Q${q.id}    ${r.awarded} / ${q.marks}  (${verdict})    time ${fmtTimingBreakdown(qParts)}`, { size: 11, bold: true, color: full ? C.green : none ? C.red : C.amber, after: 0.8 });
       w.text(plain((q.pre ? q.pre + ' ' : '') + q.q), { size: 9.5, after: 0.8 });
       if (q.ctx) w.text('Figure: ' + q.ctx, { size: 8.5, color: C.grey, after: 0.8 }); else if (q.fig) w.text('(See the figure in the test.)', { size: 8.5, color: C.grey, after: 0.8 });
       if (q.type === 'mcq') w.text(q.opts.map((o, i) => `(${i + 1}) ${plain(o) || 'figure ' + (i + 1)}`).join('     '), { size: 9, color: C.grey, after: 1.5 });
@@ -4324,13 +4441,23 @@ function downloadProgressPdf() {
       const pages = buildPages(t.questions);
       const slow = pages.map(p => {
         const key = pageKey(p);
-        const ms = a.timings?.[key]?.ms || p.reduce((s, q) => s + (a.timings?.[q.id]?.ms || 0), 0);
+        const slot = ensureTiming(a.timings?.[key] || p.reduce((acc, q) => {
+          const s = a.timings?.[q.id];
+          if (!s) return acc;
+          acc.ms += s.ms || 0; acc.attemptMs += s.attemptMs || 0; acc.reviewMs += s.reviewMs || 0;
+          acc.visits = Math.max(acc.visits, s.visits || 0); acc.answered = acc.answered || !!s.answered;
+          return acc;
+        }, { ms: 0, attemptMs: 0, reviewMs: 0, visits: 0, answered: false }));
+        const parts = {
+          ms: slot.ms, attemptMs: slot.attemptMs, reviewMs: slot.reviewMs, visits: slot.visits,
+          answered: slot.answered, hasSplit: slot.attemptMs > 0 || slot.reviewMs > 0 || slot.answered
+        };
         const lost = p.some(q => (a.results?.[q.id]?.awarded || 0) < q.marks);
-        return { label: pageLabel(p), ms, lost };
-      }).filter(x => x.ms > 0).sort((x, y) => y.ms - x.ms).slice(0, 8);
+        return { label: pageLabel(p), parts, lost };
+      }).filter(x => x.parts.ms > 0).sort((x, y) => y.parts.ms - x.parts.ms).slice(0, 8);
       if (slow.length) {
-        w.text('Time per screen (longest first):', { size: 9, bold: true, after: 0.3 });
-        slow.forEach(x => w.text(`  ${x.label}: ${fmtDuration(x.ms)}${x.lost ? ' (marks lost)' : ''}`, { size: 9, color: C.grey, after: 0.2 }));
+        w.text('Time per screen (longest first; attempt / review when known):', { size: 9, bold: true, after: 0.3 });
+        slow.forEach(x => w.text(`  ${x.label}: ${fmtTimingBreakdown(x.parts)}${x.lost ? ' (marks lost)' : ''}`, { size: 9, color: C.grey, after: 0.2 }));
       }
       const asked = (a.chatLog || []).filter(m => m.role === 'Student').length;
       if (asked) w.text(`Asked Maths Buddy ${asked} question${asked > 1 ? 's' : ''}.`, { size: 9, color: C.grey, after: 0.3 });
@@ -4345,15 +4472,16 @@ function downloadProgressPdf() {
 }
 
 /* ===================== START ===================== */
-window.addEventListener('beforeunload', () => { if (TEST && !marked) { flushQuestionTime(); saveAnswers(); } });
+window.addEventListener('beforeunload', () => { if (TEST && !marked) { notePageAnswerProgress(); flushQuestionTime(); saveAnswers(); } });
 document.addEventListener('visibilitychange', () => {
   if (!TEST || marked) return;
   if (document.visibilityState === 'hidden') {
+    notePageAnswerProgress();
     flushQuestionTime();
     saveAnswers();
     stopPaperTimer();
   } else {
-    if (PAGES[pageIndex]) beginQuestionTime(pageKey(PAGES[pageIndex]));
+    if (PAGES[pageIndex]) beginQuestionTime(pageKey(PAGES[pageIndex]), { countVisit: false });
     startPaperTimer();
   }
 });
