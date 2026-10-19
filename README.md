@@ -1,29 +1,25 @@
 # P4 Maths Practice Papers
 
-Interactive 2025 End-of-Year Primary 4 maths practice papers with **one question per page**, per-question timing for reports, local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
+Interactive 2025 End-of-Year Primary 4 maths practice papers with **one question screen at a time** (multi-part questions stay together), per-screen timing for reports, local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
 
-While a paper is open, a background elapsed timer runs from the moment it starts. Time spent on each question is saved and included in the results summary, marked-paper PDF, and progress report.
+## Gemini API key
 
-## Gemini API key (required for AI marking / Maths Buddy)
+The repo secret **`GEMINI_API_KEY`** is injected at **deploy time** into the live Pages site. It is **not** committed to git (GitHub push protection blocks that).
 
-The live site reads the key from `config.js`. That file is filled by GitHub Actions from the repository secret **`GEMINI_API_KEY`**.
+1. Add/update [Settings → Secrets → Actions → `GEMINI_API_KEY`](https://github.com/imBuenoing/p4-math/settings/secrets/actions)
+2. Switch Pages to Actions deploy (one-time): [Settings → Pages](https://github.com/imBuenoing/p4-math/settings/pages) → **Build and deployment** → Source = **GitHub Actions**
+3. Re-run **Actions → Deploy site with Gemini key → Run workflow** (or push to `main`)
 
-1. Open [Settings → Secrets and variables → Actions](https://github.com/imBuenoing/p4-math/settings/secrets/actions)
-2. Create or update secret **`GEMINI_API_KEY`** with your Google AI Studio / Gemini API key
-3. Re-run **Actions → Deploy Processed Files to Main Branch Root → Run workflow** (or push any commit to `main`)
-
-If the secret is missing or empty, the deploy workflow fails on purpose instead of publishing a blank key.
-
-Local preview: put a real key in `config.js`, or leave the placeholder to use local marks only.
-
-## Pages
-
-Enable **GitHub Pages** from the `main` branch root (`/`) → `https://imbuenoing.github.io/p4-math/`
+Check: open `https://imbuenoing.github.io/p4-math/config.js` — it should show a real key string, not `__GEMINI_API_KEY_PLACEHOLDER__`.
 
 ## Access PIN
 
-The landing page and papers stay locked until the 4-digit site access code is entered. Only a hash is stored (`ACCESS_PIN_HASH`). Unlock lasts for the browser tab session; use **Lock** on the landing page to require the code again.
+Landing and papers stay locked until the 4-digit site access code is entered (`ACCESS_PIN_HASH`). Use **Lock** on the landing page to lock again.
 
 ## Parent PIN
 
-Used to mark a paper or clear saved data. Only a hash is stored (`PIN_HASH`). To change either PIN, open the browser console and run `pinHash('your-pin')`, then paste the result into `index.html`.
+Used to mark a paper or clear saved data (`PIN_HASH`).
+
+## iOS keyboard math suggestions
+
+Answer fields use `inputmode="text"` plus autocomplete/autocorrect off to reduce iOS Keyboard Math Results. Device setting (optional): **Settings → General → Keyboard → Math Results → Off**.
