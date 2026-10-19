@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+  workflow_dispatch:
 
 jobs:
   build-and-deploy:
@@ -19,26 +20,38 @@ jobs:
           fetch-depth: 0
 
       - name: Inject API Key into config.js
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
         run: |
-          if [ ! -f config.js ]; then
-            echo "ERROR: config.js not found in repository root!"
+          if [ -z "${GEMINI_API_KEY}" ]; then
+            echo "::error::Repository secret GEMINI_API_KEY is missing or empty."
+            echo "Add it under Settings → Secrets and variables → Actions,"
+            echo "then re-run this workflow (Actions → Deploy Processed Files → Run workflow)."
             exit 1
           fi
 
-          sed "s|__GEMINI_API_KEY_PLACEHOLDER__|${{ secrets.GEMINI_API_KEY }}|g" config.js > config.js.tmp
-          mv config.js.tmp config.js
-        env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          python3 - <<'PY'
+          import json, os, pathlib
+          key = os.environ["GEMINI_API_KEY"].strip()
+          if not key:
+              raise SystemExit("GEMINI_API_KEY is empty after strip")
+          pathlib.Path("config.js").write_text(
+              "// config.js — injected by GitHub Actions from secret GEMINI_API_KEY\n"
+              f"const geminiAPIKey = {json.dumps(key)};\n",
+              encoding="utf-8",
+          )
+          print("Wrote config.js with a non-empty Gemini API key.")
+          PY
 
       - name: Commit and Push changes
         run: |
           git config --global user.name 'github-actions[bot]'
           git config --global user.email 'github-actions[bot]@users.noreply.github.com'
 
-          if ! git diff --quiet HEAD -- config.js index.html; then
-            git add config.js index.html
-            git commit -m "Inject API key and update site files [skip ci]"
+          if ! git diff --quiet HEAD -- config.js; then
+            git add config.js
+            git commit -m "Inject API key into config.js [skip ci]"
             git push origin main
           else
-            echo "No changes to commit to config.js or index.html."
+            echo "config.js already up to date."
           fi
