@@ -129,6 +129,10 @@
     <h3 class="text-2xl font-bold text-blue-800 mb-1">Test Results</h3>
     <p id="score-display" class="text-4xl font-bold text-slate-800 my-3"></p>
     <div id="section-scores" class="flex flex-wrap justify-center gap-3 text-sm mb-3"></div>
+    <details id="topic-report" class="hidden text-left text-sm bg-white border border-slate-200 rounded-lg p-3 mb-4">
+      <summary class="cursor-pointer font-medium text-slate-700">Strengths and weak areas</summary>
+      <div id="topic-report-body" class="mt-3 space-y-3 text-slate-700"></div>
+    </details>
     <p id="time-summary" class="text-sm text-slate-600 mb-3"></p>
     <p id="marking-status" class="text-sm text-slate-500 mb-3"></p>
     <button id="retry-ai" type="button" onclick="retryAiMarking()" class="hidden mb-4 bg-white border border-blue-300 text-blue-700 hover:bg-blue-50 px-4 py-2 rounded-lg text-sm font-medium">↻ Try Gemini feedback again</button>
@@ -2110,6 +2114,652 @@ TESTS.push({
 })();
 
 
+
+/* =====================================================================
+   STRENGTHS & WEAK AREAS — MOE P4 syllabus topics + deterministic report
+   ===================================================================== */
+const TOPICS = [
+  { id: 'wn-numbers', strand: 'Number and Algebra', label: 'Whole numbers to 100 000' },
+  { id: 'wn-factors', strand: 'Number and Algebra', label: 'Factors and multiples' },
+  { id: 'wn-operations', strand: 'Number and Algebra', label: 'The four operations' },
+  { id: 'fr-mixed', strand: 'Number and Algebra', label: 'Mixed numbers and improper fractions' },
+  { id: 'fr-set', strand: 'Number and Algebra', label: 'Fraction of a set' },
+  { id: 'fr-addsub', strand: 'Number and Algebra', label: 'Adding and subtracting fractions' },
+  { id: 'dec-place', strand: 'Number and Algebra', label: 'Decimals to 3 decimal places' },
+  { id: 'dec-addsub', strand: 'Number and Algebra', label: 'Adding and subtracting decimals' },
+  { id: 'dec-muldiv', strand: 'Number and Algebra', label: 'Multiplying and dividing decimals' },
+  { id: 'area-perimeter', strand: 'Measurement and Geometry', label: 'Area and perimeter' },
+  { id: 'angles', strand: 'Measurement and Geometry', label: 'Angles' },
+  { id: 'rect-square', strand: 'Measurement and Geometry', label: 'Rectangles and squares' },
+  { id: 'symmetry', strand: 'Measurement and Geometry', label: 'Line symmetry' },
+  { id: 'nets', strand: 'Measurement and Geometry', label: 'Nets and solids' },
+  { id: 'data-tables-line-pie', strand: 'Statistics', label: 'Tables, line graphs and pie charts' },
+  { id: 'data-bar', strand: 'Statistics', label: 'Bar graphs (past year)' },
+  { id: 'time', strand: 'Past-year measurement', label: 'Time (past year)' },
+  { id: 'measures', strand: 'Past-year measurement', label: 'Length, mass and volume (past year)' },
+  { id: 'ps-model', strand: 'Problem solving', label: 'Model and units method' },
+  { id: 'ps-heuristics', strand: 'Problem solving', label: 'Heuristics' },
+];
+const TOPIC_BY_ID = Object.fromEntries(TOPICS.map(t => [t.id, t]));
+const ALWAYS_FLAG_IF_UNTESTED = ['time', 'data-bar'];
+
+const TOPIC_TAGS = {
+  "acs": {
+    "1": { topic: "wn-numbers" },
+    "2": { topic: "wn-numbers" },
+    "3": { topic: "dec-place" },
+    "4": { topic: "dec-place" },
+    "5": { topic: "fr-addsub" },
+    "6": { topic: "fr-mixed" },
+    "7": { topic: "wn-operations" },
+    "8": { topic: "wn-factors" },
+    "9": { topic: "data-tables-line-pie" },
+    "10": { topic: "area-perimeter" },
+    "11": { topic: "wn-factors" },
+    "12": { topic: "area-perimeter" },
+    "13": { topic: "symmetry" },
+    "14": { topic: "area-perimeter" },
+    "15": { topic: "nets" },
+    "16": { topic: "wn-numbers" },
+    "17": { topic: "wn-numbers" },
+    "18": { topic: "dec-place" },
+    "19": { topic: "wn-operations" },
+    "20": { topic: "wn-numbers" },
+    "21": { topic: "fr-set" },
+    "22": { topic: "data-tables-line-pie" },
+    "23": { topic: "data-tables-line-pie" },
+    "24": { topic: "angles", skills:["rect-square"] },
+    "25": { topic: "angles" },
+    "26": { topic: "fr-mixed", skills:["fr-addsub"] },
+    "27": { topic: "wn-operations" },
+    "28": { topic: "data-tables-line-pie" },
+    "29": { topic: "dec-place" },
+    "30": { topic: "angles" },
+    "31": { topic: "symmetry" },
+    "32": { topic: "nets" },
+    "33": { topic: "area-perimeter" },
+    "34": { topic: "data-tables-line-pie" },
+    "35": { topic: "dec-muldiv" },
+    "36": { topic: "ps-model" },
+    "37": { topic: "ps-model", skills:["fr-set"] },
+    "38": { topic: "area-perimeter" },
+    "39": { topic: "ps-model", skills:["fr-set"] },
+    "40": { topic: "ps-model", skills:["fr-set"] },
+    "41a": { topic: "ps-heuristics" },
+    "41b": { topic: "ps-heuristics", skills:["wn-operations"] },
+    "42": { topic: "ps-heuristics" },
+    "43": { topic: "area-perimeter" },
+  },
+  "nanhua": {
+    "1": { topic: "wn-numbers" },
+    "2": { topic: "wn-operations" },
+    "3": { topic: "dec-place" },
+    "4": { topic: "fr-set" },
+    "5": { topic: "fr-addsub" },
+    "6": { topic: "angles" },
+    "7": { topic: "rect-square" },
+    "8": { topic: "dec-place" },
+    "9": { topic: "nets" },
+    "10": { topic: "wn-operations" },
+    "11": { topic: "nets" },
+    "12": { topic: "data-bar" },
+    "13": { topic: "dec-place" },
+    "14": { topic: "wn-factors" },
+    "15": { topic: "area-perimeter" },
+    "16": { topic: "dec-place" },
+    "17": { topic: "wn-operations" },
+    "18": { topic: "wn-operations" },
+    "19": { topic: "nets" },
+    "20": { topic: "data-tables-line-pie" },
+    "21": { topic: "wn-numbers" },
+    "22": { topic: "wn-operations" },
+    "23": { topic: "wn-factors" },
+    "24": { topic: "wn-operations" },
+    "25": { topic: "fr-addsub" },
+    "26": { topic: "dec-place" },
+    "27": { topic: "dec-addsub", skills:["dec-place"] },
+    "28": { topic: "dec-muldiv" },
+    "29": { topic: "angles" },
+    "30": { topic: "symmetry" },
+    "31": { topic: "dec-place" },
+    "32": { topic: "data-tables-line-pie" },
+    "33": { topic: "time" },
+    "34": { topic: "fr-mixed" },
+    "35": { topic: "measures" },
+    "37": { topic: "angles" },
+    "38": { topic: "data-bar" },
+    "39": { topic: "area-perimeter" },
+    "40": { topic: "area-perimeter" },
+    "41": { topic: "ps-model", skills:["wn-operations"] },
+    "42": { topic: "ps-model" },
+    "43": { topic: "dec-place" },
+    "44": { topic: "area-perimeter" },
+    "46": { topic: "area-perimeter" },
+    "36a": { topic: "fr-mixed" },
+    "36b": { topic: "fr-mixed" },
+    "45a": { topic: "data-tables-line-pie" },
+    "45b": { topic: "ps-model" },
+  },
+  "nanchiau": {
+    "1": { topic: "wn-operations" },
+    "2": { topic: "wn-numbers" },
+    "3": { topic: "dec-place" },
+    "4": { topic: "dec-addsub", skills:["dec-place"] },
+    "5": { topic: "fr-addsub" },
+    "6": { topic: "fr-mixed" },
+    "7": { topic: "measures" },
+    "8": { topic: "area-perimeter" },
+    "9": { topic: "wn-factors" },
+    "10": { topic: "measures" },
+    "11": { topic: "fr-addsub" },
+    "12": { topic: "area-perimeter" },
+    "13": { topic: "rect-square" },
+    "14": { topic: "data-bar" },
+    "15": { topic: "wn-numbers" },
+    "16": { topic: "wn-numbers" },
+    "17": { topic: "wn-numbers" },
+    "18": { topic: "dec-muldiv" },
+    "19": { topic: "dec-place" },
+    "20": { topic: "fr-addsub" },
+    "21": { topic: "fr-mixed" },
+    "22": { topic: "angles" },
+    "23": { topic: "angles" },
+    "24": { topic: "fr-set" },
+    "25": { topic: "measures" },
+    "26": { topic: "time" },
+    "27": { topic: "area-perimeter" },
+    "28": { topic: "angles" },
+    "29": { topic: "symmetry" },
+    "30": { topic: "data-tables-line-pie" },
+    "31": { topic: "data-tables-line-pie" },
+    "32": { topic: "ps-model" },
+    "33": { topic: "dec-addsub", skills:["dec-muldiv"] },
+    "35": { topic: "data-tables-line-pie" },
+    "36": { topic: "ps-model" },
+    "37": { topic: "ps-heuristics" },
+    "38": { topic: "ps-heuristics" },
+    "34a": { topic: "nets" },
+    "34b": { topic: "nets" },
+    "39a": { topic: "rect-square" },
+    "39b": { topic: "rect-square", skills:["area-perimeter"] },
+    "40a": { topic: "data-bar", skills:["data-tables-line-pie"] },
+    "40b": { topic: "data-bar", skills:["data-tables-line-pie"] },
+    "41a": { topic: "ps-heuristics" },
+    "41b": { topic: "ps-heuristics" },
+    "42a": { topic: "ps-model" },
+    "42b": { topic: "ps-model", skills:["wn-operations"] },
+    "43a": { topic: "area-perimeter" },
+    "43b": { topic: "area-perimeter" },
+  },
+  "mahabodhi": {
+    "1": { topic: "wn-operations" },
+    "2": { topic: "wn-factors" },
+    "3": { topic: "wn-operations" },
+    "4": { topic: "wn-operations" },
+    "5": { topic: "rect-square" },
+    "6": { topic: "dec-place" },
+    "7": { topic: "angles" },
+    "8": { topic: "symmetry" },
+    "9": { topic: "wn-operations" },
+    "10": { topic: "fr-addsub" },
+    "11": { topic: "area-perimeter" },
+    "12": { topic: "data-tables-line-pie" },
+    "13": { topic: "nets" },
+    "14": { topic: "angles" },
+    "15": { topic: "data-bar" },
+    "16": { topic: "wn-numbers" },
+    "17": { topic: "wn-numbers" },
+    "18": { topic: "wn-operations" },
+    "19": { topic: "fr-set" },
+    "20": { topic: "fr-addsub" },
+    "21": { topic: "angles" },
+    "22": { topic: "dec-place" },
+    "23": { topic: "dec-place" },
+    "24": { topic: "dec-muldiv" },
+    "25": { topic: "wn-operations" },
+    "26": { topic: "wn-operations" },
+    "27": { topic: "wn-operations" },
+    "28": { topic: "fr-addsub" },
+    "29": { topic: "measures" },
+    "30": { topic: "data-tables-line-pie" },
+    "31": { topic: "measures" },
+    "32": { topic: "time" },
+    "33": { topic: "nets" },
+    "34": { topic: "wn-operations" },
+    "35": { topic: "area-perimeter" },
+    "36": { topic: "ps-model", skills:["wn-operations"] },
+    "37": { topic: "ps-model" },
+    "39": { topic: "dec-place" },
+    "43": { topic: "ps-model" },
+    "38a": { topic: "measures" },
+    "38b": { topic: "fr-mixed" },
+    "40a": { topic: "data-tables-line-pie" },
+    "40b": { topic: "ps-model" },
+    "41a": { topic: "angles", skills:["rect-square"] },
+    "41b": { topic: "area-perimeter" },
+    "42a": { topic: "ps-model" },
+    "42b": { topic: "ps-model" },
+  },
+  "redswastika": {
+    "1": { topic: "wn-numbers" },
+    "2": { topic: "wn-factors" },
+    "3": { topic: "wn-operations" },
+    "4": { topic: "fr-set" },
+    "5": { topic: "dec-place" },
+    "6": { topic: "angles" },
+    "7": { topic: "wn-factors" },
+    "8": { topic: "wn-numbers" },
+    "9": { topic: "data-tables-line-pie" },
+    "10": { topic: "measures" },
+    "11": { topic: "time" },
+    "12": { topic: "wn-operations" },
+    "13": { topic: "area-perimeter" },
+    "14": { topic: "nets" },
+    "15": { topic: "nets" },
+    "16": { topic: "data-tables-line-pie" },
+    "17": { topic: "data-tables-line-pie" },
+    "18": { topic: "wn-operations" },
+    "19": { topic: "dec-place" },
+    "20": { topic: "dec-place" },
+    "21": { topic: "wn-numbers" },
+    "22": { topic: "wn-operations" },
+    "23": { topic: "fr-addsub" },
+    "24": { topic: "fr-mixed" },
+    "25": { topic: "fr-addsub" },
+    "26": { topic: "wn-operations" },
+    "27": { topic: "dec-place" },
+    "28": { topic: "dec-place" },
+    "29": { topic: "fr-addsub" },
+    "31": { topic: "wn-numbers" },
+    "32": { topic: "wn-operations" },
+    "33": { topic: "dec-place" },
+    "34": { topic: "dec-place" },
+    "35": { topic: "symmetry" },
+    "37": { topic: "nets" },
+    "39": { topic: "area-perimeter" },
+    "40": { topic: "wn-operations" },
+    "30a": { topic: "angles" },
+    "30b": { topic: "angles" },
+    "36a": { topic: "rect-square" },
+    "36b": { topic: "wn-operations" },
+    "38a": { topic: "nets" },
+    "38b": { topic: "nets" },
+    "41a": { topic: "wn-factors" },
+    "41b": { topic: "ps-model" },
+    "42a": { topic: "data-tables-line-pie" },
+    "42b": { topic: "ps-model" },
+    "43a": { topic: "fr-addsub" },
+    "43b": { topic: "ps-model" },
+    "44a": { topic: "data-bar" },
+    "44b": { topic: "fr-addsub" },
+    "45a": { topic: "area-perimeter" },
+    "45b": { topic: "ps-model" },
+  },
+  "rosyth": {
+    "1": { topic: "wn-numbers" },
+    "2": { topic: "wn-operations" },
+    "3": { topic: "wn-operations" },
+    "4": { topic: "angles" },
+    "5": { topic: "wn-operations" },
+    "6": { topic: "angles", skills:["rect-square"] },
+    "7": { topic: "dec-place" },
+    "8": { topic: "time" },
+    "9": { topic: "angles", skills:["rect-square"] },
+    "10": { topic: "angles", skills:["rect-square"] },
+    "11": { topic: "symmetry" },
+    "12": { topic: "data-tables-line-pie" },
+    "13": { topic: "area-perimeter" },
+    "14": { topic: "wn-operations" },
+    "15": { topic: "time" },
+    "16": { topic: "wn-operations" },
+    "17": { topic: "wn-numbers" },
+    "18": { topic: "fr-addsub" },
+    "19": { topic: "fr-mixed" },
+    "20": { topic: "angles", skills:["rect-square"] },
+    "21": { topic: "dec-place" },
+    "22": { topic: "dec-place" },
+    "23": { topic: "dec-place" },
+    "24": { topic: "fr-addsub" },
+    "26": { topic: "wn-operations" },
+    "27": { topic: "time" },
+    "28": { topic: "rect-square" },
+    "29": { topic: "wn-operations" },
+    "30": { topic: "area-perimeter" },
+    "31": { topic: "area-perimeter" },
+    "32": { topic: "wn-operations" },
+    "33": { topic: "dec-place" },
+    "34": { topic: "wn-operations" },
+    "35": { topic: "dec-place" },
+    "36": { topic: "time" },
+    "37": { topic: "ps-model" },
+    "38": { topic: "ps-model", skills:["fr-set"] },
+    "40": { topic: "area-perimeter" },
+    "43": { topic: "ps-model", skills:["wn-operations"] },
+    "44": { topic: "ps-model", skills:["wn-operations"] },
+    "25a": { topic: "data-tables-line-pie" },
+    "25b": { topic: "wn-operations" },
+    "39a": { topic: "wn-factors" },
+    "39b": { topic: "ps-model" },
+    "41a": { topic: "ps-model", skills:["wn-operations"] },
+    "41b": { topic: "ps-model" },
+    "42a": { topic: "ps-model" },
+    "42b": { topic: "ps-model" },
+  },
+  "sthilda": {
+    "1": { topic: "wn-operations" },
+    "2": { topic: "wn-operations" },
+    "3": { topic: "fr-addsub" },
+    "4": { topic: "wn-operations" },
+    "5": { topic: "dec-place" },
+    "6": { topic: "dec-place" },
+    "7": { topic: "area-perimeter" },
+    "8": { topic: "angles" },
+    "9": { topic: "wn-factors" },
+    "10": { topic: "wn-operations" },
+    "11": { topic: "wn-operations" },
+    "12": { topic: "wn-operations" },
+    "13": { topic: "measures" },
+    "14": { topic: "wn-operations" },
+    "15": { topic: "dec-place" },
+    "16": { topic: "area-perimeter" },
+    "17": { topic: "angles", skills:["rect-square"] },
+    "18": { topic: "data-tables-line-pie" },
+    "19": { topic: "data-bar" },
+    "20": { topic: "wn-operations" },
+    "21": { topic: "wn-numbers" },
+    "22": { topic: "wn-factors" },
+    "23": { topic: "fr-mixed" },
+    "24": { topic: "fr-addsub" },
+    "25": { topic: "fr-addsub" },
+    "26": { topic: "dec-addsub", skills:["dec-place"] },
+    "27": { topic: "dec-muldiv" },
+    "28": { topic: "angles" },
+    "29": { topic: "angles" },
+    "30": { topic: "area-perimeter" },
+    "31": { topic: "data-tables-line-pie" },
+    "32": { topic: "wn-operations" },
+    "33": { topic: "wn-operations" },
+    "34": { topic: "dec-place" },
+    "35": { topic: "area-perimeter" },
+    "36": { topic: "area-perimeter" },
+    "37": { topic: "angles" },
+    "38": { topic: "rect-square" },
+    "39": { topic: "data-tables-line-pie" },
+    "40": { topic: "wn-factors" },
+    "41": { topic: "ps-model", skills:["wn-operations"] },
+    "42": { topic: "ps-model" },
+    "43": { topic: "ps-model" },
+    "44": { topic: "time" },
+    "45a": { topic: "area-perimeter" },
+    "45b": { topic: "area-perimeter" },
+  },
+  "catholichigh": {
+    "1": { topic: "wn-operations" },
+    "2": { topic: "wn-numbers" },
+    "3": { topic: "wn-factors" },
+    "4": { topic: "fr-mixed" },
+    "5": { topic: "dec-muldiv" },
+    "6": { topic: "rect-square" },
+    "7": { topic: "wn-operations" },
+    "8": { topic: "wn-numbers" },
+    "9": { topic: "fr-set" },
+    "10": { topic: "wn-operations" },
+    "11": { topic: "wn-operations" },
+    "12": { topic: "area-perimeter" },
+    "13": { topic: "area-perimeter" },
+    "14": { topic: "wn-operations" },
+    "15": { topic: "dec-place" },
+    "16": { topic: "symmetry" },
+    "17": { topic: "wn-operations" },
+    "18": { topic: "data-tables-line-pie" },
+    "19": { topic: "data-tables-line-pie" },
+    "20": { topic: "nets" },
+    "21": { topic: "wn-numbers" },
+    "22": { topic: "dec-place" },
+    "23": { topic: "fr-mixed" },
+    "24": { topic: "dec-place" },
+    "25": { topic: "fr-mixed" },
+    "26": { topic: "wn-factors" },
+    "27": { topic: "dec-addsub", skills:["dec-place"] },
+    "28": { topic: "fr-addsub" },
+    "29": { topic: "angles" },
+    "30": { topic: "wn-numbers" },
+    "31": { topic: "dec-place" },
+    "32": { topic: "dec-place" },
+    "33": { topic: "wn-operations" },
+    "34": { topic: "symmetry" },
+    "35": { topic: "rect-square" },
+    "36": { topic: "area-perimeter" },
+    "37": { topic: "data-tables-line-pie" },
+    "38": { topic: "angles" },
+    "39": { topic: "data-tables-line-pie" },
+    "40": { topic: "measures" },
+    "41": { topic: "ps-model" },
+    "42a": { topic: "ps-model", skills:["fr-set"] },
+    "42b": { topic: "ps-model" },
+    "43a": { topic: "dec-place" },
+    "43b": { topic: "ps-model" },
+    "44a": { topic: "area-perimeter" },
+    "44b": { topic: "ps-model" },
+    "45a": { topic: "data-tables-line-pie" },
+    "45b": { topic: "ps-heuristics" },
+  },
+};
+
+function applyTopicTags() {
+  TESTS.forEach(t => {
+    const map = TOPIC_TAGS[t.id] || {};
+    t.questions.forEach(q => {
+      const tag = map[q.id];
+      if (!tag) return;
+      q.topic = tag.topic;
+      if (tag.skills?.length) q.skills = tag.skills;
+    });
+  });
+}
+function listUntaggedQuestions() {
+  const missing = [];
+  TESTS.forEach(t => t.questions.forEach(q => {
+    if (!q.topic || !TOPIC_BY_ID[q.topic]) missing.push(`${t.id} Q${q.id}`);
+  }));
+  return missing;
+}
+function checkTopicCoverage() {
+  applyTopicTags();
+  const missing = listUntaggedQuestions();
+  if (missing.length) console.warn('[topics] Untagged questions:', missing);
+  else console.info('[topics] All questions have a primary topic.');
+  return missing;
+}
+applyTopicTags();
+checkTopicCoverage();
+
+function isUnansweredResult(q, r) {
+  if (!r) return true;
+  const g = r.given;
+  if (g == null) return true;
+  const s = String(g).trim();
+  return !s || s === '(not answered)';
+}
+function factualDiagnosis(q, r) {
+  if (r?.ai?.feedback) {
+    const line = String(r.ai.feedback).replace(/\s+/g, ' ').trim();
+    return line.split(/(?<=[.!?])\s+/)[0].slice(0, 140);
+  }
+  if (r?.note) return String(r.note).replace(/\s+/g, ' ').trim().slice(0, 140);
+  const got = (r?.given != null && String(r.given).trim()) ? String(r.given).trim() : '';
+  let want = '';
+  try { want = correctAnswerText(q); } catch (_) { want = q.show || ''; }
+  want = String(want || '').replace(/\s+/g, ' ').trim();
+  if (!got) return 'left blank';
+  if (want) return `wrote ${got} instead of ${want}`.slice(0, 140);
+  return 'incorrect answer';
+}
+function timingMsForQuestion(qid, timings) {
+  if (!timings) return 0;
+  if (timings[qid]?.ms) return timings[qid].ms;
+  // page-key timings like "41a+41b"
+  for (const [k, v] of Object.entries(timings)) {
+    if (k.split('+').includes(String(qid))) return v.ms || 0;
+  }
+  return 0;
+}
+
+/** Pure analysis for one paper. No Gemini. */
+function buildTopicReport(test, results, timings) {
+  const questions = test.questions || [];
+  const byTopic = {};
+  TOPICS.forEach(t => {
+    byTopic[t.id] = {
+      id: t.id, label: t.label, strand: t.strand,
+      awarded: 0, available: 0, pct: null, count: 0,
+      correct: 0, partial: 0, wrong: 0, unanswered: 0,
+      qids: [], lost: 0, timeMs: 0, rating: 'not-tested',
+      limitedEvidence: false, errors: []
+    };
+  });
+
+  let blankMarks = 0;
+  const blankRun = [];
+  const statuses = [];
+
+  questions.forEach((q, idx) => {
+    const tid = q.topic;
+    const bucket = byTopic[tid] || (byTopic[tid] = {
+      id: tid, label: tid, strand: 'Other', awarded: 0, available: 0, pct: null, count: 0,
+      correct: 0, partial: 0, wrong: 0, unanswered: 0, qids: [], lost: 0, timeMs: 0,
+      rating: 'not-tested', limitedEvidence: false, errors: []
+    });
+    const r = results?.[q.id] || {};
+    const awarded = r.awarded || 0;
+    const max = r.max || q.marks;
+    bucket.count++;
+    bucket.available += max;
+    bucket.awarded += awarded;
+    bucket.lost += Math.max(0, max - awarded);
+    bucket.qids.push(q.id);
+    bucket.timeMs += timingMsForQuestion(q.id, timings);
+
+    let st;
+    if (isUnansweredResult(q, r)) {
+      st = 'unanswered';
+      bucket.unanswered++;
+      blankMarks += max;
+      blankRun.push({ idx, id: q.id, marks: max });
+    } else if (awarded >= max) {
+      st = 'correct';
+      bucket.correct++;
+    } else if (awarded > 0) {
+      st = 'partial';
+      bucket.partial++;
+      bucket.errors.push({ id: q.id, diagnosis: factualDiagnosis(q, r) });
+    } else {
+      st = 'wrong';
+      bucket.wrong++;
+      bucket.errors.push({ id: q.id, diagnosis: factualDiagnosis(q, r) });
+    }
+    statuses.push({ idx, id: q.id, st, marks: max });
+  });
+
+  Object.values(byTopic).forEach(b => {
+    if (b.count === 0) { b.rating = 'not-tested'; b.pct = null; return; }
+    b.pct = b.available ? Math.round(b.awarded / b.available * 100) : 0;
+    b.limitedEvidence = b.count === 1;
+    if (b.pct >= 80 && b.count >= 2) b.rating = 'strength';
+    else if (b.pct < 50 || b.lost >= 4) b.rating = 'weak';
+    else b.rating = 'developing';
+  });
+
+  // Consecutive blank runs
+  let pacing = null;
+  const runs = [];
+  let cur = null;
+  statuses.forEach(s => {
+    if (s.st === 'unanswered') {
+      if (!cur) cur = { start: s.id, end: s.id, count: 1, marks: s.marks };
+      else { cur.end = s.id; cur.count++; cur.marks += s.marks; }
+    } else if (cur) { runs.push(cur); cur = null; }
+  });
+  if (cur) runs.push(cur);
+  const longRun = runs.filter(r => r.count >= 3).sort((a, b) => b.marks - a.marks)[0];
+  if (blankMarks >= 6 || longRun) {
+    pacing = {
+      blankMarks,
+      run: longRun ? `Q${longRun.start}–Q${longRun.end} left blank` : null,
+      message: longRun
+        ? `${blankMarks} marks were left blank, including ${longRun.count} questions in a row (Q${longRun.start}–Q${longRun.end}).`
+        : `${blankMarks} marks were left blank on this paper.`
+    };
+  }
+
+  const timeSinks = [];
+  if (timings && Object.keys(timings).length) {
+    questions.forEach(q => {
+      const ms = timingMsForQuestion(q.id, timings);
+      const r = results?.[q.id] || {};
+      if (ms >= 5 * 60 * 1000) timeSinks.push({ id: q.id, ms, blank: isUnansweredResult(q, r), kind: 'slow' });
+      if (ms > 0 && ms < 20 * 1000 && isUnansweredResult(q, r)) timeSinks.push({ id: q.id, ms, blank: true, kind: 'skipped' });
+    });
+  }
+
+  const strengths = Object.values(byTopic).filter(b => b.rating === 'strength').sort((a, b) => b.pct - a.pct || b.available - a.available);
+  const weak = Object.values(byTopic).filter(b => b.rating === 'weak').sort((a, b) => b.lost - a.lost);
+  const developing = Object.values(byTopic).filter(b => b.rating === 'developing').sort((a, b) => b.lost - a.lost);
+  const notTested = Object.values(byTopic).filter(b => b.rating === 'not-tested');
+  const flaggedUntested = ALWAYS_FLAG_IF_UNTESTED.filter(id => {
+    const b = byTopic[id];
+    if (!b || b.count === 0) return true;
+    // only blank answers = not properly tested
+    return b.count > 0 && b.unanswered === b.count;
+  }).map(id => byTopic[id]);
+
+  const totalAwarded = questions.reduce((s, q) => s + (results?.[q.id]?.awarded || 0), 0);
+  const totalMax = questions.reduce((s, q) => s + q.marks, 0);
+  const totalLost = totalMax - totalAwarded;
+  const focus = weak.slice(0, 2);
+  const focusLost = focus.reduce((s, b) => s + b.lost, 0);
+
+  const secScores = {};
+  (test.sections || []).forEach(s => { secScores[s.id] = { got: 0, max: 0, title: s.title }; });
+  questions.forEach(q => {
+    if (!secScores[q.sec]) secScores[q.sec] = { got: 0, max: 0, title: q.sec };
+    secScores[q.sec].max += q.marks;
+    secScores[q.sec].got += results?.[q.id]?.awarded || 0;
+  });
+
+  let biggestIssue = '';
+  if (pacing && blankMarks >= 6 && (!focus[0] || blankMarks >= focus[0].lost)) {
+    biggestIssue = `${blankMarks} of the ${totalLost} lost marks were on questions left blank`;
+  } else if (focus[0]) {
+    biggestIssue = `the largest share of lost marks was on ${focus[0].label.toLowerCase()} (${focus[0].lost} marks)`;
+  } else if (totalLost === 0) {
+    biggestIssue = 'no marks were lost on this paper';
+  } else {
+    biggestIssue = `${totalLost} marks were lost across a mix of topics`;
+  }
+
+  const summary = `Score on this paper: ${totalAwarded} / ${totalMax}. `
+    + Object.values(secScores).map(s => `${s.title.split(':')[0]} ${s.got}/${s.max}`).join(', ')
+    + `. Biggest issue: ${biggestIssue}.`;
+
+  let focusText = '';
+  if (focus.length === 0) {
+    focusText = totalLost === 0
+      ? 'Keep practising a mixed set of papers to maintain this level.'
+      : 'Review the partly correct questions and tidy up careless slips.';
+  } else if (focus.length === 1) {
+    focusText = `Focus next on ${focus[0].label}. It accounts for ${focus[0].lost} of the ${totalLost} lost marks on this paper.`;
+  } else {
+    focusText = `Focus next on ${focus[0].label} and ${focus[1].label}. These two cover ${focusLost} of the ${totalLost} lost marks on this paper.`;
+  }
+
+  return {
+    totalAwarded, totalMax, totalLost, blankMarks, pacing, timeSinks,
+    strengths, weak, developing, notTested, flaggedUntested, focus, focusLost,
+    byTopic, secScores, summary, focusText, biggestIssue
+  };
+}
+
 /* =====================================================================
    GEMINI MARKING + MATHS BUDDY
    ---------------------------------------------------------------------
@@ -2947,6 +3597,7 @@ function updateSummary(status) {
     ? `<div class="font-medium text-slate-700 mb-2">Review these ${missed.length} question${missed.length > 1 ? 's' : ''}:</div><div class="flex flex-wrap justify-center gap-1.5">` +
       missed.map(q => { const r = results[q.id] || {}, part = (r.awarded || 0) > 0; return `<a href="#card-${q.id}" data-q="${q.id}" class="inline-block px-2 py-0.5 rounded-md border text-sm font-medium no-underline ${part ? 'bg-amber-50 border-amber-300 text-amber-800 hover:bg-amber-100' : 'bg-red-50 border-red-300 text-red-700 hover:bg-red-100'}">Q${q.id}</a>`; }).join('') + `</div>`
     : '🎉 Full marks — well done!';
+  renderTopicReportOnScreen();
   updateJumpButtons();
 }
 $id('review-links').addEventListener('click', e => { const a = e.target.closest('a[data-q]'); if (!a) return; e.preventDefault(); focusQuestion(a.dataset.q); });
@@ -3410,6 +4061,7 @@ function pdfWriter(footer) {
   const PW = 210, PH = 297, Mg = 16, CW = PW - 2 * Mg; let y = Mg;
   const w = {
     fit(h) { if (y + h > PH - Mg - 6) { doc.addPage(); y = Mg; } },
+    newPage() { doc.addPage(); y = Mg; },
     text(s, o = {}) {
       const size = o.size || 10, indent = o.indent || 0, lh = size * 0.3528 * 1.35;
       doc.setFont(o.mono ? 'courier' : 'helvetica', o.bold ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...(o.color || C.ink));
@@ -3419,6 +4071,29 @@ function pdfWriter(footer) {
     field(label, value, o = {}) { w.text(label, { size: 8, bold: true, color: o.labelColor || C.grey, after: 0.2 }); w.text(value, { size: 9.5, indent: 3, mono: o.mono, color: o.color, after: 1.6 }); },
     rule() { w.fit(5); y += 1.5; doc.setDrawColor(203, 213, 225); doc.line(Mg, y, PW - Mg, y); y += 3; },
     space(h) { y += h; },
+    table(cols, rows, o = {}) {
+      const widths = cols.map(c => c.w || (CW / cols.length));
+      const size = o.size || 8.5, lh = size * 0.3528 * 1.25, pad = 1.2;
+      const drawRow = (cells, header) => {
+        const lines = cells.map((cell, i) => doc.splitTextToSize(pdfSafe(cell), widths[i] - 2 * pad));
+        const rowH = Math.max(...lines.map(l => l.length)) * lh + 2 * pad;
+        w.fit(rowH + 1);
+        let x = Mg;
+        if (header) { doc.setFillColor(241, 245, 249); doc.rect(Mg, y, CW, rowH, 'F'); }
+        doc.setDrawColor(203, 213, 225);
+        doc.rect(Mg, y, CW, rowH);
+        doc.setFont('helvetica', header ? 'bold' : 'normal'); doc.setFontSize(size); doc.setTextColor(...(header ? C.ink : C.ink));
+        lines.forEach((ls, i) => {
+          ls.forEach((line, li) => doc.text(line, x + pad, y + pad + (li + 1) * lh - lh * 0.25));
+          x += widths[i];
+          if (i < cols.length - 1) doc.line(x, y, x, y + rowH);
+        });
+        y += rowH;
+      };
+      drawRow(cols.map(c => c.label), true);
+      rows.forEach(r => drawRow(r));
+      y += o.after ?? 2;
+    },
     save(name) {
       const n = doc.getNumberOfPages();
       for (let i = 1; i <= n; i++) { doc.setPage(i); doc.setFont('helvetica', 'normal'); doc.setFontSize(8); doc.setTextColor(148, 163, 184); doc.text(pdfSafe(footer), Mg, PH - 8); doc.text(`Page ${i} of ${n}`, PW - Mg, PH - 8, { align: 'right' }); }
@@ -3439,6 +4114,133 @@ function pdfHeader(w, heading) {
   w.text(`Score: ${Object.values(got).reduce((a, b) => a + b, 0)} / ${maxMarks(TEST)}`, { size: 14, bold: true, after: 0.5 });
   w.text(TEST.sections.map(s => `${secLabel(s)} ${got[s.id]}/${max[s.id]}`).join('    '), { size: 10, after: 1 });
   w.text(`Total time: ${fmtDuration(paperElapsedMs())}   ·   Time on questions: ${fmtDuration(totalTrackedMs())}`, { size: 10, after: 1 });
+}
+function currentTopicReport() {
+  return buildTopicReport(TEST, results, att?.timings || {});
+}
+function renderTopicReportOnScreen() {
+  const box = $id('topic-report'), body = $id('topic-report-body');
+  if (!box || !body || !TEST || !marked) return;
+  const report = currentTopicReport();
+  if (att) att.topicReport = { summary: report.summary, focusText: report.focusText, polishedAt: att.topicReport?.polishedAt };
+  const qList = ids => ids.map(id => `<a href="#card-${id}" data-q="${id}" class="qlink">Q${id}</a>`).join(', ');
+  let html = `<p>${esc(att?.topicReport?.summary || report.summary)}</p>`;
+  if (report.strengths.length) {
+    html += `<div><div class="font-semibold text-green-800 mb-1">Strengths</div><ul class="list-disc pl-5 space-y-1">`;
+    report.strengths.forEach(b => {
+      html += `<li>${esc(b.label)} (${b.awarded}/${b.available}, ${b.pct}%): ${qList(b.qids)}${b.limitedEvidence ? ' <span class="text-slate-500">(limited evidence)</span>' : ''}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+  const weakRows = [];
+  if (report.pacing) weakRows.push({ topic: 'Pacing', lost: report.pacing.blankMarks, qs: report.pacing.run || 'blank answers', what: report.pacing.message });
+  report.weak.forEach(b => {
+    const errs = b.errors.slice(0, 3).map(e => `Q${e.id}: ${e.diagnosis}`).join('; ');
+    const lim = b.limitedEvidence ? ' (limited evidence — only 1 question)' : '';
+    weakRows.push({ topic: b.label + lim, lost: b.lost, qs: b.qids.map(id => 'Q' + id).join(', '), what: errs || `${b.wrong} wrong, ${b.partial} partly correct, ${b.unanswered} blank` });
+  });
+  if (weakRows.length) {
+    html += `<div><div class="font-semibold text-red-800 mb-1">Weak areas</div>
+      <div class="overflow-x-auto"><table class="w-full text-xs border border-slate-200"><thead class="bg-slate-50"><tr>
+        <th class="border px-2 py-1 text-left">Topic</th><th class="border px-2 py-1">Marks lost</th>
+        <th class="border px-2 py-1 text-left">Questions</th><th class="border px-2 py-1 text-left">What went wrong</th>
+      </tr></thead><tbody>`;
+    weakRows.forEach(r => {
+      html += `<tr><td class="border px-2 py-1">${esc(r.topic)}</td><td class="border px-2 py-1 text-center">${r.lost}</td>
+        <td class="border px-2 py-1">${esc(r.qs)}</td><td class="border px-2 py-1">${esc(r.what)}</td></tr>`;
+    });
+    html += `</tbody></table></div></div>`;
+  }
+  const notWell = [...report.flaggedUntested];
+  report.notTested.forEach(b => { if (!notWell.some(x => x.id === b.id)) notWell.push(b); });
+  const showNot = notWell.filter(b => report.notTested.some(n => n.id === b.id) || ALWAYS_FLAG_IF_UNTESTED.includes(b.id));
+  if (showNot.length) {
+    html += `<div><div class="font-semibold text-slate-700 mb-1">Not well tested by this paper</div><p class="text-slate-600">${esc(showNot.map(b => b.label).join('; '))}</p></div>`;
+  }
+  if (report.timeSinks.length) {
+    html += `<div><div class="font-semibold text-slate-700 mb-1">Time sinks</div><ul class="list-disc pl-5">`;
+    report.timeSinks.slice(0, 6).forEach(s => {
+      html += `<li>Q${s.id}: ${fmtDuration(s.ms)}${s.kind === 'skipped' ? ' (skipped quickly, blank)' : s.blank ? ' (blank)' : ''}</li>`;
+    });
+    html += `</ul></div>`;
+  }
+  html += `<div><div class="font-semibold text-blue-800 mb-1">Where to focus next</div><p>${esc(att?.topicReport?.focusText || report.focusText)}</p></div>`;
+  body.innerHTML = html;
+  box.classList.remove('hidden');
+  body.querySelectorAll('a[data-q]').forEach(a => a.addEventListener('click', e => { e.preventDefault(); focusQuestion(a.dataset.q); }));
+  maybePolishTopicReport(report);
+}
+function appendTopicReportToPdf(w) {
+  const report = currentTopicReport();
+  const name = store.name || 'Student';
+  w.newPage();
+  w.text(`Strengths and Weak Areas: ${name}`, { size: 16, bold: true, color: C.blue, after: 1 });
+  w.text('Based on this paper only (MOE Primary 4 Mathematics syllabus).', { size: 9, color: C.grey, after: 2 });
+  w.text('Summary', { size: 12, bold: true, color: C.blue, after: 0.5 });
+  w.text(att?.topicReport?.summary || report.summary, { size: 10, after: 2 });
+  w.text('Strengths', { size: 12, bold: true, color: C.green, after: 0.5 });
+  if (!report.strengths.length) w.text('No topic reached the strength bar on this paper (needs 80%+ on at least 2 questions).', { size: 9.5, color: C.grey, after: 2 });
+  else report.strengths.forEach(b => {
+    w.text(`• ${b.label} (all or nearly all correct): Q${b.qids.join(', Q')}${b.limitedEvidence ? ' — limited evidence (1 question)' : ''}`, { size: 9.5, after: 0.8 });
+  });
+  w.space(1);
+  w.text('Weak areas', { size: 12, bold: true, color: C.red, after: 0.5 });
+  const rows = [];
+  if (report.pacing) rows.push(['Pacing', String(report.pacing.blankMarks), report.pacing.run || 'blanks', report.pacing.message]);
+  report.weak.forEach(b => {
+    const errs = b.errors.slice(0, 4).map(e => `Q${e.id}: ${e.diagnosis}`).join(' | ');
+    const lim = b.limitedEvidence ? ' (limited evidence)' : '';
+    rows.push([b.label + lim, String(b.lost), b.qids.map(id => 'Q' + id).join(', '), errs || `${b.wrong} wrong / ${b.partial} part / ${b.unanswered} blank`]);
+  });
+  if (!rows.length) w.text('No topic met the weak-area bar on this paper.', { size: 9.5, color: C.grey, after: 2 });
+  else w.table(
+    [{ label: 'Topic', w: 48 }, { label: 'Marks lost', w: 22 }, { label: 'Questions', w: 40 }, { label: 'What went wrong', w: 68 }],
+    rows,
+    { size: 8 }
+  );
+  w.text('Not well tested by this paper', { size: 12, bold: true, color: C.blue, after: 0.5 });
+  const notLines = [];
+  report.notTested.forEach(b => notLines.push(b.label));
+  ALWAYS_FLAG_IF_UNTESTED.forEach(id => {
+    const b = report.byTopic[id];
+    if (!b) return;
+    if (b.count === 0) return; // already in notTested
+    if (b.unanswered === b.count) notLines.push(`${b.label} (only blank answers on this paper)`);
+  });
+  if (!notLines.length) w.text('This paper touched every listed P4 topic at least once.', { size: 9.5, color: C.grey, after: 2 });
+  else notLines.forEach(line => w.text(`• ${line}`, { size: 9.5, after: 0.6 }));
+  if (report.timeSinks.length) {
+    w.space(1);
+    w.text('Time sinks', { size: 11, bold: true, after: 0.5 });
+    report.timeSinks.slice(0, 8).forEach(s => {
+      w.text(`• Q${s.id}: ${fmtDuration(s.ms)}${s.kind === 'skipped' ? ' — skipped in under 20 s and left blank' : s.blank ? ' — over 5 min and left blank' : ' — over 5 min'}`, { size: 9, after: 0.5 });
+    });
+  }
+  w.space(1);
+  w.text('Where to focus next', { size: 12, bold: true, color: C.blue, after: 0.5 });
+  w.text(att?.topicReport?.focusText || report.focusText, { size: 10, after: 1 });
+}
+async function maybePolishTopicReport(report) {
+  if (!MARKING_API.url || !att || att.topicReport?.polishedAt) return;
+  try {
+    const prompt = `You help a parent understand a Primary 4 maths practice paper. Rewrite ONLY these two short texts in plain English. Keep every fact and every number. Do not add new claims. Return JSON {"summary":"...","focusText":"..."}.\n\nsummary: ${report.summary}\nfocusText: ${report.focusText}`;
+    const { text } = await callGemini({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 400 }
+    }, { attemptTimeoutMs: 20000, budgetMs: 25000 });
+    const parsed = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*|\s*```$/g, ''));
+    if (parsed.summary && parsed.focusText) {
+      att.topicReport = { summary: String(parsed.summary).trim(), focusText: String(parsed.focusText).trim(), polishedAt: Date.now() };
+      saveStore();
+      const body = $id('topic-report-body');
+      if (body) {
+        const ps = body.querySelectorAll('p');
+        if (ps[0]) ps[0].textContent = att.topicReport.summary;
+        const focusP = body.querySelector('.font-semibold.text-blue-800 + p') || body.querySelectorAll('p')[body.querySelectorAll('p').length - 1];
+        if (focusP) focusP.textContent = att.topicReport.focusText;
+      }
+    }
+  } catch (_) { /* silent fallback to deterministic text */ }
 }
 function downloadMarkedPdf() {
   if (!marked) return;
@@ -3479,6 +4281,7 @@ function downloadMarkedPdf() {
     }
   }
   if (TEST.notes?.length) { w.fit(20); w.text('Notes about this paper', { size: 12, bold: true, color: C.blue, after: 1 }); TEST.notes.forEach(n => w.text('- ' + n, { size: 9, after: 1 })); }
+  appendTopicReportToPdf(w);
   w.save(fileStem(`${TEST.id}-Marked`));
 }
 function downloadChatPdf() {
@@ -3514,6 +4317,10 @@ function downloadProgressPdf() {
       if (totalMs) w.text(`Total time: ${fmtDuration(totalMs)}`, { size: 9, color: C.grey, after: 0.3 });
       const lost = t.questions.filter(q => (a.results?.[q.id]?.awarded || 0) < q.marks);
       if (lost.length) w.text(`Marks lost on: ${lost.map(q => 'Q' + q.id).join(', ')}`, { size: 9, color: C.grey, after: 0.3 });
+      try {
+        const tr = buildTopicReport(t, a.results || {}, a.timings || {});
+        if (tr.focus?.length) w.text(`Weakest topics: ${tr.focus.map(b => b.label).join('; ')}`, { size: 9, color: C.red, after: 0.3 });
+      } catch (_) {}
       const pages = buildPages(t.questions);
       const slow = pages.map(p => {
         const key = pageKey(p);
