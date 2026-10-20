@@ -57,6 +57,8 @@
   .bar{height:.5rem;border-radius:999px;background:#e2e8f0;overflow:hidden}
   .bar>span{display:block;height:100%;border-radius:999px}
   .qcard.q-hidden{display:none}
+  .qcard{scroll-margin-top:1rem}
+  .qcard.locked .math-tb{display:none}
   #q-jump button.answered{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
   #q-jump button.current{background:#2563eb;border-color:#2563eb;color:#fff}
   #q-jump button.missed{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
@@ -1750,9 +1752,9 @@ const rows = (n, shaded) => SV(`0 0 104 ${n * 14 + 4}`, 104, Array.from({ length
 const q7fig = fig(SV('0 0 330 110', 320, `<rect x="20" y="15" width="80" height="80" ${ST}/>` + T(60, 60, 'X', 'middle', 'font-size="16"') + `<rect x="140" y="30" width="150" height="60" ${ST}/>` + T(215, 66, 'Y', 'middle', 'font-size="16"') +
   DIM(140, 18, 290, 18) + T(215, 12, '25 cm') + DIM(302, 30, 302, 90) + T(308, 64, '7 cm', 'start')));
 
-const q8fig = fig(SV('0 0 330 190', 300,
+const q8fig = fig(SV('0 0 330 215', 300,
   G.poly([[30,25],[300,25],[302,144],[167,179]]) + arcPath(30, 25, 26, -48.2, 0) + arcPath(302, 144, 18, 91, 194.5) + arcPath(167, 179, 22, 14.5, 131.8) +
-  T(22, 20, 'A', 'middle', 'font-style="italic"') + T(310, 20, 'B', 'middle', 'font-style="italic"') + T(316, 150, 'C', 'middle', 'font-style="italic"') + T(167, 196, 'D', 'middle', 'font-style="italic"')));
+  T(22, 20, 'A', 'middle', 'font-style="italic"') + T(310, 20, 'B', 'middle', 'font-style="italic"') + T(316, 150, 'C', 'middle', 'font-style="italic"') + T(167, 200, 'D', 'middle', 'font-style="italic"')));
 
 const q16fig = fig(SV('0 0 220 180', 200, `<rect x="50" y="15" width="64" height="140" ${ST}/><rect x="114" y="60" width="42" height="42" ${ST}/>` + G.dash(114, 60, 114, 102) +
   T(135, 78, 'Area', 'middle', 'font-size="10"') + T(135, 92, '= 9 m²', 'middle', 'font-size="10"') + DIM(38, 15, 38, 155) + T(32, 88, '10 m', 'end') + DIM(50, 166, 114, 166) + T(82, 178, '4 m')));
@@ -2778,6 +2780,8 @@ const GEMINI = {
   // Tried in this order. If one is overloaded (503), rate-limited (429) or missing (404),
   // the next is used automatically. Models that don't exist for your key are skipped.
   models: ["gemini-flash-latest", "gemini-2.5-flash", "gemini-flash-lite-latest", "gemini-2.5-flash-lite", "gemini-2.0-flash"],
+  // Prefer these for parent-facing report polish (still falls back to models above).
+  reportModels: ["gemini-2.5-pro", "gemini-2.0-pro", "gemini-1.5-pro-latest", "gemini-1.5-pro"],
   autoDiscover: true,      // also ask Google which other Flash models this key can use, as extra backups
   triesPerModel: 2,        // retries on the same model (with backoff) before moving on
   stickyMinutes: 30        // after a model works, try it first for this long
@@ -3092,6 +3096,52 @@ const choiceOpts = q => (q.choices || []).map(c => Array.isArray(c) ? c : [c, c]
 
 /* Reduce iOS Keyboard Math Results / predictive autocomplete on answer fields. */
 const NO_PRED = 'autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" inputmode="text" enterkeyhint="done" data-1p-ignore="true" data-lpignore="true" data-form-type="other"';
+
+/* On-screen math symbols for P4 — kids shouldn't need to hunt keyboard keys. */
+const MATH_SYMBOLS = [
+  { s: '+', tip: 'Add' },
+  { s: '−', tip: 'Subtract' },
+  { s: '×', tip: 'Multiply' },
+  { s: '÷', tip: 'Divide' },
+  { s: '=', tip: 'Equals' },
+  { s: '(', tip: 'Open bracket' },
+  { s: ')', tip: 'Close bracket' },
+  { s: '<', tip: 'Less than' },
+  { s: '>', tip: 'Greater than' },
+  { s: '°', tip: 'Degrees' },
+  { s: '∠', tip: 'Angle' },
+  { s: '⊥', tip: 'Perpendicular' },
+  { s: '∥', tip: 'Parallel' },
+  { s: '²', tip: 'Squared (for cm² or m²)' },
+  { s: '$', tip: 'Dollar' },
+];
+function mathToolbarHTML() {
+  const btns = MATH_SYMBOLS.map(k =>
+    `<button type="button" class="math-sym px-2 py-1 min-w-[1.75rem] rounded-md border border-slate-200 bg-white text-slate-800 text-base font-semibold hover:bg-blue-50 hover:border-blue-300 active:bg-blue-100" data-math-sym="${esc(k.s)}" title="${esc(k.tip)}" aria-label="${esc(k.tip)}">${k.s}</button>`
+  ).join('');
+  return `<div class="math-tb mt-2 flex flex-wrap items-center gap-1" role="toolbar" aria-label="Math symbols">
+    <span class="text-xs text-slate-400 mr-0.5 shrink-0">Symbols</span>${btns}
+  </div>`;
+}
+function insertMathSymbol(sym, card) {
+  if (marked || !sym) return;
+  let el = null;
+  if (card) {
+    const active = document.activeElement;
+    if (active && card.contains(active) && (active.matches('input[data-role], textarea[data-role]'))) el = active;
+    else if (card._mathTarget && card.contains(card._mathTarget) && !card._mathTarget.disabled) el = card._mathTarget;
+    else el = card.querySelector('textarea[data-role="work"]:not([disabled]), input[data-role="ans"]:not([disabled]), input[data-role]:not([disabled])');
+  }
+  if (!el || el.disabled) return;
+  el.focus();
+  const start = el.selectionStart ?? el.value.length;
+  const end = el.selectionEnd ?? start;
+  const before = el.value.slice(0, start), after = el.value.slice(end);
+  el.value = before + sym + after;
+  const pos = start + sym.length;
+  try { el.setSelectionRange(pos, pos); } catch (_) {}
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+}
 function fracBox() {
   return `<div class="inline-flex flex-col items-center gap-1">
     <input type="text" data-role="n" class="inp fin" aria-label="numerator" ${NO_PRED}>
@@ -3157,6 +3207,7 @@ function renderQuiz() {
   QUESTIONS.forEach(q => {
     const sec = sectionOf(q.sec);
     const preHTML = q.pre ? `<div class="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">${q.pre}${q.preFig || ''}</div>` : '';
+    const needsSymbols = sec.work !== 'none' || ['num', 'text', 'frac', 'mixed', 'multi'].includes(q.type);
     const workBox = sec.work === 'none' ? '' : `
       <details class="mt-3" ${sec.work === 'open' ? 'open' : ''}>
         <summary class="text-sm text-slate-500 cursor-pointer select-none">My working${sec.work === 'optional' ? ' (optional)' : ''}</summary>
@@ -3176,6 +3227,7 @@ function renderQuiz() {
         </div>
         ${figHTML}
         ${inputHTML(q)}
+        ${needsSymbols ? mathToolbarHTML() : ''}
         ${workBox}
         <div class="fb hidden mt-4 text-sm"></div>
       </div>`);
@@ -3204,6 +3256,18 @@ function renderQuiz() {
     const b = e.target.closest('button[data-pi]'); if (!b) return;
     showQuestionPage(+b.dataset.pi);
   };
+  // Math symbol pad: remember last answer field, insert without stealing focus
+  stage.addEventListener('focusin', e => {
+    const el = e.target.closest('input[data-role], textarea[data-role]');
+    const card = e.target.closest('.qcard');
+    if (el && card) card._mathTarget = el;
+  });
+  stage.addEventListener('mousedown', e => {
+    const b = e.target.closest('[data-math-sym]');
+    if (!b) return;
+    e.preventDefault();
+    insertMathSymbol(b.dataset.mathSym, b.closest('.qcard'));
+  });
   const form = $id('quiz-form');
   form.setAttribute('autocomplete', 'off');
   form.oninput = form.onchange = () => { if (!marked) { scheduleSave(); updateJumpButtons(); } };
@@ -3276,7 +3340,7 @@ function updateJumpButtons() {
     }
   });
 }
-function showQuestionPage(i) {
+function showQuestionPage(i, opts = {}) {
   if (!PAGES.length) return;
   i = Math.max(0, Math.min(PAGES.length - 1, i));
   const nextPage = PAGES[i];
@@ -3317,7 +3381,7 @@ function showQuestionPage(i) {
   updateJumpButtons();
   updatePaperTimerDisplay();
   if (!marked) beginQuestionTime(key, { countVisit: !sameScreen });
-  window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (!opts.skipScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 function renderInteractive(q, card, reveal = false) {
@@ -3977,12 +4041,17 @@ function friendlyError(e) {
   if (/network/i.test(m)) return 'Couldn\'t reach Gemini — check your internet connection.';
   return m || 'Something went wrong.';
 }
-async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, onStatus = () => {} } = {}) {
+async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, onStatus = () => {}, preferModels = null, skipSticky = false } = {}) {
   if (!GEMINI.apiKey) throw new Error('no API key set');
   const start = Date.now();
   let lastErr = null, models = (await modelList()).filter(m => !deadModels.has(m));
-  const sticky = readSticky();
-  if (sticky && models.includes(sticky)) models = [sticky, ...models.filter(m => m !== sticky)];
+  if (preferModels?.length) {
+    const pref = preferModels.filter(m => !deadModels.has(m));
+    models = [...pref, ...models.filter(m => !pref.includes(m))];
+  } else if (!skipSticky) {
+    const sticky = readSticky();
+    if (sticky && models.includes(sticky)) models = [sticky, ...models.filter(m => m !== sticky)];
+  }
   for (let mi = 0; mi < models.length; mi++) {
     const model = models[mi];
     for (let attempt = 1; attempt <= GEMINI.triesPerModel; attempt++) {
@@ -4002,7 +4071,7 @@ async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, on
       } finally { clearTimeout(t); }
       if (res.ok) {
         const text = (json?.candidates?.[0]?.content?.parts || []).filter(p => !p.thought).map(p => p.text || '').join('').trim();
-        if (text) { writeSticky(model); return { text, model }; }
+        if (text) { if (!skipSticky) writeSticky(model); return { text, model }; }
         lastErr = new Error(json?.promptFeedback?.blockReason ? 'blocked: ' + json.promptFeedback.blockReason : 'empty reply');
         continue;
       }
@@ -4083,10 +4152,15 @@ function addMsg(role, text, opts = {}) {
 function focusQuestion(id) {
   const i = PAGES.findIndex(p => p.some(q => q.id === id));
   if (i < 0) return;
-  showQuestionPage(i);
+  showQuestionPage(i, { skipScroll: true });
   const card = $id('card-' + id); if (!card) return;
-  card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
-  setTimeout(() => card.classList.remove('flash'), 2700);
+  // Wait a frame so q-hidden is cleared, then bring the card into view
+  // (results card sits above the questions — scrolling to y=0 only shows results).
+  requestAnimationFrame(() => {
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.classList.remove('flash'); void card.offsetWidth; card.classList.add('flash');
+    setTimeout(() => card.classList.remove('flash'), 2700);
+  });
 }
 function showChips(id) {
   const q = qById(id), full = (results[id]?.awarded ?? 0) === q.marks;
@@ -4246,13 +4320,17 @@ function renderTopicReportOnScreen() {
   });
   if (weakRows.length) {
     html += `<div><div class="font-semibold text-red-800 mb-1">Weak areas</div>
-      <div class="overflow-x-auto"><table class="w-full text-xs border border-slate-200"><thead class="bg-slate-50"><tr>
-        <th class="border px-2 py-1 text-left">Topic</th><th class="border px-2 py-1">Marks lost</th>
-        <th class="border px-2 py-1 text-left">Questions</th><th class="border px-2 py-1 text-left">What went wrong</th>
+      <div class="overflow-x-auto"><table class="w-full text-xs border border-slate-200" style="table-layout:auto;min-width:36rem"><thead class="bg-slate-50"><tr>
+        <th class="border px-2 py-1 text-left">Topic</th>
+        <th class="border px-2 py-1 text-center whitespace-nowrap" style="min-width:5.5rem">Marks lost</th>
+        <th class="border px-2 py-1 text-left whitespace-nowrap">Questions</th>
+        <th class="border px-2 py-1 text-left">What went wrong</th>
       </tr></thead><tbody>`;
     weakRows.forEach(r => {
-      html += `<tr><td class="border px-2 py-1">${esc(r.topic)}</td><td class="border px-2 py-1 text-center">${r.lost}</td>
-        <td class="border px-2 py-1">${esc(r.qs)}</td><td class="border px-2 py-1">${esc(r.what)}</td></tr>`;
+      html += `<tr><td class="border px-2 py-1">${esc(r.topic)}</td>
+        <td class="border px-2 py-1 text-center whitespace-nowrap font-medium">${r.lost}</td>
+        <td class="border px-2 py-1 whitespace-nowrap">${esc(r.qs)}</td>
+        <td class="border px-2 py-1">${esc(r.what)}</td></tr>`;
     });
     html += `</tbody></table></div></div>`;
   }
@@ -4338,11 +4416,32 @@ function appendTopicReportToPdf(w) {
 async function maybePolishTopicReport(report) {
   if (!MARKING_API.url || !att || att.topicReport?.polishedAt) return;
   try {
-    const prompt = `You help a parent understand a Primary 4 maths practice paper. Rewrite ONLY these two short texts in plain English. Keep every fact and every number. Do not add new claims. Return JSON {"summary":"...","focusText":"..."}.\n\nsummary: ${report.summary}\nfocusText: ${report.focusText}`;
+    const weakBits = (report.pacing ? [`Pacing: ${report.pacing.message}`] : [])
+      .concat(report.weak.slice(0, 4).map(b => `${b.label}: lost ${b.lost} of ${b.available} (Q${b.qids.join(', Q')})`));
+    const strengthBits = report.strengths.slice(0, 4).map(b => `${b.label}: ${b.pct}% on Q${b.qids.join(', Q')}`);
+    const prompt = `You help a Singapore parent understand ONE Primary 4 maths practice paper (MOE syllabus).
+Rewrite ONLY the summary and focusText in warm, plain English for a parent.
+Rules:
+- Keep every fact and every number from the drafts. Do not invent causes, ability claims, or comparisons with other students.
+- Say "this paper", not general ability. Name question numbers when useful.
+- summary: 2–3 short sentences (score, sections, biggest issue).
+- focusText: 2–3 short sentences on where to practise next.
+Return JSON {"summary":"...","focusText":"..."}.
+
+Draft summary: ${report.summary}
+Draft focusText: ${report.focusText}
+Strengths on this paper: ${strengthBits.join('; ') || 'none at the strength bar'}
+Weak areas on this paper: ${weakBits.join('; ') || 'none at the weak bar'}
+Blank marks: ${report.blankMarks}; total lost: ${report.totalLost}.`;
     const { text } = await callGemini({
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.2, maxOutputTokens: 400 }
-    }, { attemptTimeoutMs: 20000, budgetMs: 25000 });
+      generationConfig: { responseMimeType: 'application/json', temperature: 0.25, maxOutputTokens: 500 }
+    }, {
+      attemptTimeoutMs: 35000,
+      budgetMs: 50000,
+      preferModels: GEMINI.reportModels,
+      skipSticky: true
+    });
     const parsed = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*|\s*```$/g, ''));
     if (parsed.summary && parsed.focusText) {
       att.topicReport = { summary: String(parsed.summary).trim(), focusText: String(parsed.focusText).trim(), polishedAt: Date.now() };
