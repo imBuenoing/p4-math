@@ -4131,9 +4131,11 @@ async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, on
 }
 
 /* ===================== CHAT ASSISTANT (Maths Buddy) ===================== */
-const TUTOR_PROMPT = `You are "Maths Buddy", a friendly, patient maths tutor for a Primary 4 student (about 10 years old) in Singapore. The student has just finished a practice test that has been marked and is asking about the marking.
+const TUTOR_PROMPT = `You are "Maths Buddy", a friendly, patient maths tutor for a Primary 4 student (about 10 years old) in Singapore. The student has just finished a practice test that has been marked and is asking about it.
 How to help:
-- Use the marked test data sent with the student's message (question, figure description, correct answer, model solution, the student's answer and working, marks awarded, marker's feedback). Don't invent details that aren't there.
+- Use the marked test data sent with the message: paper overview, the focus question(s), the student's own final answer and working, marks, marker feedback, and any related parts. Don't invent details that aren't there.
+- Always ground your help in what THIS student wrote. When explaining a mistake, refer to their answer and/or working (quote or paraphrase briefly). If working is missing, say so and teach from the model solution without inventing their steps.
+- Use related parts (e.g. Q41a with Q41b) or the paper overview when that helps the student see the bigger picture.
 - Explain in short, simple steps (usually under 120 words). Use the Singapore model or units method when it helps. End with one small check question when it's useful.
 - If the student thinks the marking is wrong, check carefully. If they are right, say so honestly and suggest they show a parent or teacher (you cannot change marks). If the marking is right, explain kindly why.
 - Be warm and encouraging; never make the student feel bad.
@@ -4151,13 +4153,50 @@ function findQuestionRefs(text) {
   }
   return ids;
 }
-function qContext(id) {
-  const q = qById(id), r = results[id] || {}, card = $id('card-' + id);
-  const L = [`Q${id} (Section ${q.sec}, ${q.marks} marks)`, `Question: ${plain((q.pre ? q.pre + ' ' : '') + q.q)}`];
+function studentWorkingText(id) {
+  const card = $id('card-' + id);
+  const fromCard = card ? val(card, 'work') : '';
+  if (String(fromCard || '').trim()) return String(fromCard).trim();
+  const fromAtt = att?.answers?.[id]?.work;
+  if (String(fromAtt || '').trim()) return String(fromAtt).trim();
+  return '';
+}
+function studentAnswerText(id) {
+  const r = results[id];
+  if (r?.given != null && String(r.given).trim() && String(r.given).trim() !== '(not answered)') return String(r.given).trim();
+  const v = att?.answers?.[id];
+  if (!v) return '';
+  if (v.mcq) return `(${v.mcq})`;
+  const parts = Object.entries(v).filter(([k, val]) => k !== 'work' && k !== 'st' && String(val || '').trim());
+  if (parts.length) return parts.map(([, val]) => val).join(' ');
+  return '';
+}
+function relatedQuestionIds(id) {
+  const q = qById(id); if (!q) return [];
+  const stem = qStem(id);
+  const page = pageOfQuestion(id);
+  const pageIds = new Set((page || []).map(x => x.id));
+  return QUESTIONS.filter(x => x.id !== id && (
+    qStem(x.id) === stem ||
+    pageIds.has(x.id) ||
+    (q.pre && x.pre && q.pre === x.pre)
+  )).map(x => x.id);
+}
+function qContext(id, opts = {}) {
+  const q = qById(id); if (!q) return '';
+  const r = results[id] || {};
+  const focus = opts.focus !== false;
+  const L = [`${focus ? 'FOCUS ' : 'RELATED '}Q${id} (Section ${q.sec}, ${q.marks} marks)`];
+  L.push(`Question: ${plain((q.pre ? q.pre + ' ' : '') + q.q)}`);
   if (q.ctx) L.push(`Figure: ${q.ctx}`);
   if (q.type === 'mcq') L.push('Options: ' + q.opts.map((o, i) => `(${i + 1}) ${plain(o) || 'figure ' + (i + 1)}`).join('; '));
-  L.push(`Correct answer: ${correctAnswerText(q)}`, `Model solution: ${plain(q.work)}`, `Student's answer: ${r.given || '(not answered)'}`);
-  const w = card ? val(card, 'work') : ''; if (w) L.push(`Student's working: ${w}`);
+  L.push(`Correct answer: ${correctAnswerText(q)}`);
+  L.push(`Model solution: ${plain(q.work)}`);
+  const given = studentAnswerText(id);
+  L.push(`Student's answer: ${given || '(not answered)'}`);
+  const working = studentWorkingText(id);
+  L.push(working ? `Student's working:\n${working}` : `Student's working: (none written)`);
+  if (workRequired(q) && !working) L.push('Note: working was required for this question.');
   L.push(`Marks awarded: ${r.awarded ?? 0}/${q.marks}${r.note ? ' (' + r.note + ')' : ''}`);
   if (r.ai?.feedback) L.push(`Marker's feedback: ${r.ai.feedback}`);
   if (r.ai?.working) L.push(`Marker's suggested working: ${r.ai.working}`);
@@ -4165,8 +4204,53 @@ function qContext(id) {
 }
 function testSummary() {
   const tot = QUESTIONS.reduce((s, q) => s + (results[q.id]?.awarded || 0), 0);
+  const secBits = (TEST.sections || []).map(s => {
+    let got = 0, max = 0;
+    QUESTIONS.filter(q => q.sec === s.id).forEach(q => { max += q.marks; got += results[q.id]?.awarded || 0; });
+    return `${s.title.split(':')[0]} ${got}/${max}`;
+  });
   const lost = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks).map(q => `Q${q.id} (${results[q.id]?.awarded || 0}/${q.marks})`);
-  return `Paper: ${TEST.school} ${TEST.exam}. Student${store.name ? ': ' + store.name : ''}. Score: ${tot}/${maxMarks(TEST)}. Questions with marks lost: ${lost.join(', ') || 'none'}.`;
+  return `Paper: ${TEST.school} ${TEST.exam}. Student${store.name ? ': ' + store.name : ''}. Score: ${tot}/${maxMarks(TEST)}. Sections: ${secBits.join(', ')}. Questions with marks lost: ${lost.join(', ') || 'none'}.`;
+}
+/** Compact paper overview for Maths Buddy — student's attempts on missed questions. */
+function paperBuddyOverview(focusIds = []) {
+  const lines = [testSummary()];
+  try {
+    const tr = typeof buildTopicReport === 'function' ? buildTopicReport(TEST, results, att?.timings || {}) : null;
+    if (tr?.focus?.length) lines.push('Weakest topics on this paper: ' + tr.focus.map(b => `${b.label} (lost ${b.lost})`).join('; '));
+    if (tr?.pacing?.message) lines.push('Pacing: ' + tr.pacing.message);
+    if (tr?.biggestIssue) lines.push('Biggest issue: ' + tr.biggestIssue);
+  } catch (_) {}
+  const missed = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks);
+  const focus = new Set(focusIds);
+  // Prefer focus questions, then other misses (cap to keep the prompt small)
+  const ordered = [
+    ...missed.filter(q => focus.has(q.id)),
+    ...missed.filter(q => !focus.has(q.id))
+  ].slice(0, 10);
+  if (ordered.length) {
+    lines.push('Student attempts on questions with marks lost:');
+    ordered.forEach(q => {
+      const r = results[q.id] || {};
+      const given = studentAnswerText(q.id) || '(not answered)';
+      const working = studentWorkingText(q.id);
+      const workBit = working ? ` | working: ${working.replace(/\s+/g, ' ').slice(0, 160)}` : ' | working: (none)';
+      lines.push(`- Q${q.id}: ${r.awarded ?? 0}/${q.marks}; wrote ${given}${workBit}`);
+    });
+  }
+  return lines.join('\n');
+}
+function buildBuddyContext(focusIds) {
+  const related = [];
+  focusIds.forEach(id => relatedQuestionIds(id).forEach(rid => {
+    if (!focusIds.includes(rid) && !related.includes(rid)) related.push(rid);
+  }));
+  const parts = [
+    'PAPER OVERVIEW\n' + paperBuddyOverview(focusIds),
+    ...focusIds.map(id => qContext(id, { focus: true })),
+    ...related.map(id => qContext(id, { focus: false }))
+  ].filter(Boolean);
+  return parts.join('\n\n');
 }
 function fmt(text) {
   let h = esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -4229,15 +4313,23 @@ async function sendChat(textArg, opts = {}) {
   if (!ids.length && activeQ) ids = [activeQ];
   if (ids.length) { activeQ = ids[0]; showChips(activeQ); }
   if (!opts.retry) { addMsg('user', text); log.push({ role: 'Student', text, time: Date.now(), about: ids.map(i => 'Q' + i).join(', ') }); saveStore(); }
-  const ctx = ids.map(qContext).join('\n\n');
-  hist.push({ role: 'user', parts: [{ text: (ctx ? `[Marked test data]\n${ctx}\n[/Marked test data]\n\n` : '') + 'Student: ' + text }] });
+  // Fresh marked-paper context on this turn (student answer + working + related parts)
+  const ctx = buildBuddyContext(ids);
+  hist.push({ role: 'user', parts: [{ text: `[Marked test data]\n${ctx}\n[/Marked test data]\n\nStudent: ${text}` }] });
   chatBusy = true; $id('chat-send').disabled = true;
   const typing = addMsg('assistant', '', { html: '<span class="dots"><span></span><span></span><span></span></span><span class="typing-status text-xs text-slate-500 ml-2"></span>' });
   const setStatus = s => { const el = typing.querySelector('.typing-status'); if (el) el.textContent = s; };
+  // Older turns: keep the student's words only so we don't repeat the whole paper every message
+  const stripMarkedBlock = s => String(s || '').replace(/\[Marked test data\][\s\S]*?\[\/Marked test data\]\s*/g, '').trim();
+  const contentsForApi = hist.slice(-12).map((turn, i, arr) => {
+    if (turn.role !== 'user' || i === arr.length - 1) return turn;
+    const cleaned = stripMarkedBlock(turn.parts?.[0]?.text);
+    return { role: 'user', parts: [{ text: cleaned || 'Student: (earlier message)' }] };
+  });
   try {
     const { text: reply, model } = await callGemini({
-      systemInstruction: { parts: [{ text: TUTOR_PROMPT + '\n\nTest summary: ' + testSummary() }] },
-      contents: hist.slice(-15), generationConfig: { temperature: 0.4 }
+      systemInstruction: { parts: [{ text: TUTOR_PROMPT + '\n\n' + paperBuddyOverview(ids) }] },
+      contents: contentsForApi, generationConfig: { temperature: 0.4 }
     }, { attemptTimeoutMs: 30000, budgetMs: 90000, onStatus: setStatus });
     typing.remove();
     hist.push({ role: 'model', parts: [{ text: reply }] });
