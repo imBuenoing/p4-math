@@ -92,7 +92,7 @@
       <div>
         <p class="text-xs font-semibold uppercase tracking-wide text-blue-500 mb-1">Private practice · access unlocked</p>
         <h1 class="text-3xl font-bold text-blue-600">P4 Maths Practice Papers</h1>
-        <p class="text-slate-500 mt-1">2025 End-of-Year examinations · choose a paper to start, continue or review</p>
+        <p class="text-slate-500 mt-1">MOE Primary 4 Mathematics practice · choose a paper to start, continue or review</p>
       </div>
       <div class="flex flex-wrap items-center gap-2">
         <label for="student-name" class="text-sm text-slate-600">Name</label>
@@ -103,6 +103,15 @@
     <div id="overall" class="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3 text-center"></div>
     <p id="storage-warning" class="hidden mt-4 text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">⚠ This browser is not allowing the page to save progress (private window or blocked storage). Your answers and results will be lost when you close the page.</p>
   </header>
+  <div id="privacy-notice" class="mb-4 text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-xl p-4 leading-relaxed">
+    <strong>Privacy notice</strong> —
+    Your answers and progress are saved only in <em>this browser on this device</em>.
+    When AI marking or Maths Buddy is used, answers and working are sent to Google Gemini for processing and are not stored by this app.
+    If you type a name, it is kept on this device for PDFs and the screen; it is replaced with <code class="text-xs bg-slate-100 px-1 rounded">[Student]</code> before anything is sent to Gemini.
+    By using AI marking or chat you (the parent or guardian) consent to that processing.
+    <a href="https://ai.google.dev/terms" class="underline" target="_blank" rel="noopener">Gemini API Terms</a>.
+  </div>
+  <p class="mb-4 text-xs text-slate-500 leading-relaxed">Not affiliated with the Ministry of Education (Singapore) or any school. These are independent practice sets covering common Primary 4 Mathematics topics — not official school examination papers.</p>
   <div id="test-list" class="grid sm:grid-cols-2 gap-4"></div>
   <footer class="mt-6 flex flex-wrap items-center justify-between gap-3 text-sm text-slate-500">
     <span>Progress is saved in this browser on this device only.</span>
@@ -375,7 +384,7 @@ const G = {
 const TESTS = [];
 
 
-/* ===================== ACS (Primary) — P4 EOY 2025 ===================== */
+/* ===================== Practice Set A ===================== */
 (() => {
 const FIG = {
   q9: `<div class="my-3 overflow-x-auto"><table class="mx-auto text-sm border border-slate-300 text-center">
@@ -642,7 +651,7 @@ const QUESTIONS_ACS = [
 
 
 TESTS.unshift({
-  id: 'acs', school: 'Anglo-Chinese School (Primary)', short: 'ACS (Primary)', exam: '2025 End-of-Year Examination', date: '2025',
+  id: 'acs', school: 'Practice Set A', short: 'Set A', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 30, desc: 'Questions 1 to 15 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 40, desc: 'Questions 16 to 35 carry 2 marks each. Give answers in the units stated and in simplest form.', work: 'optional' },
@@ -658,7 +667,7 @@ TESTS.unshift({
 })();
 
 
-/* ===================== Nan Hua Primary — P4 EOY 2025 ===================== */
+/* ===================== Practice Set B ===================== */
 (() => {
 const sun = (x, y) => { let s = `<circle cx="${x}" cy="${y}" r="6" fill="#fff" stroke="#334155" stroke-width="1.3"/>`; for (let a = 0; a < 360; a += 45) { const [x1, y1] = polar(x, y, 8, a), [x2, y2] = polar(x, y, 12, a); s += `<line x1="${x1}" y1="${y1}" x2="${x2}" y2="${y2}" stroke="#334155" stroke-width="1.3"/>`; } return s; };
 const smile = (x, y) => `<circle cx="${x}" cy="${y}" r="10" fill="#fff" stroke="#334155" stroke-width="1.3"/><circle cx="${x - 3.5}" cy="${y - 3}" r="1.3" fill="#334155"/><circle cx="${x + 3.5}" cy="${y - 3}" r="1.3" fill="#334155"/><path d="M${x - 5} ${y + 2} Q${x} ${y + 7} ${x + 5} ${y + 2}" fill="none" stroke="#334155" stroke-width="1.3"/>`;
@@ -759,7 +768,7 @@ const q46fig = fig(SV('0 0 380 120', 380,
   T(202, 30, 'A') + T(368, 30, 'B') + T(202, 112, 'D') + T(368, 112, 'C') + T(368, 68, 'X') + T(327, 62, 'W') + T(335, 112, 'Y') + T(285, 116, 'Figure 2', 'middle', 'font-size="10"')));
 
 TESTS.push({
-  id: 'nanhua', school: 'Nan Hua Primary School', short: 'Nan Hua', exam: '2025 End-of-Year Examination', date: '30 Oct 2025',
+  id: 'nanhua', school: 'Practice Set B', short: 'Set B', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 40, desc: 'Questions 1 to 20 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 40, desc: 'Questions 21 to 40 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -898,7 +907,7 @@ TESTS.push({
 })();
 
 
-/* ===================== Nan Chiau Primary — P4 EOY 2025 ===================== */
+/* ===================== Practice Set C ===================== */
 (() => {
 const q6fig = (() => {
   const x = k => 20 + k * 30;  // quarters
@@ -1008,7 +1017,7 @@ const sqCheck = (pts, area) => {   // pts: 4 [x,y]; true if they form a square o
 };
 
 TESTS.push({
-  id: 'nanchiau', school: 'Nan Chiau Primary School', short: 'Nan Chiau', exam: '2025 End-of-Year Examination', date: '24 Oct 2025',
+  id: 'nanchiau', school: 'Practice Set C', short: 'Set C', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 28, desc: 'Questions 1 to 14 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 42, desc: 'Questions 15 to 35 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -1136,7 +1145,7 @@ TESTS.push({
 })();
 
 
-/* ===================== Maha Bodhi School — P4 EOY 2025 ===================== */
+/* ===================== Practice Set D ===================== */
 (() => {
 const strips = (n, shaded) => SV(`0 0 ${n * 18 + 4} 48`, n * 18 + 4, Array.from({ length: n }, (_, i) => `<rect x="${2 + i * 18}" y="2" width="18" height="44" ${shaded.includes(i) ? SHADE : ST}/>`).join(''));
 
@@ -1222,7 +1231,7 @@ const q41fig = (() => {
 })();
 
 TESTS.push({
-  id: 'mahabodhi', school: 'Maha Bodhi School', short: 'Maha Bodhi', exam: '2025 End-of-Year Examination', date: '24 Oct 2025',
+  id: 'mahabodhi', school: 'Practice Set D', short: 'Set D', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 30, desc: 'Questions 1 to 15 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 40, desc: 'Questions 16 to 35 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -1331,7 +1340,7 @@ TESTS.push({
 })();
 
 
-/* ===================== Red Swastika School — P4 EOY 2025 ===================== */
+/* ===================== Practice Set E ===================== */
 (() => {
 const strips = (n, shaded) => SV(`0 0 ${n * 16 + 4} 56`, n * 16 + 4, Array.from({ length: n }, (_, i) => `<rect x="${2 + i * 16}" y="2" width="16" height="52" ${shaded.includes(i) ? SHADE : ST}/>`).join(''));
 
@@ -1430,7 +1439,7 @@ const q45fig = (() => {
 })();
 
 TESTS.push({
-  id: 'redswastika', school: 'Red Swastika School', short: 'Red Swastika', exam: '2025 End-of-Year Examination', date: '28 Oct 2025',
+  id: 'redswastika', school: 'Practice Set E', short: 'Set E', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Booklet A: Multiple-Choice Questions', marks: 40, desc: 'Questions 1 to 20 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Booklet B: Short Answers', marks: 40, desc: 'Questions 21 to 40 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -1564,7 +1573,7 @@ TESTS.push({
 })();
 
 
-/* ===================== Rosyth School — P4 EOY 2025 ===================== */
+/* ===================== Practice Set F ===================== */
 (() => {
 const q4fig = (() => {   // 12 identical right-angled triangles: caps + 2 squares cut by diagonals
   const x0 = 20, s = 40, top = 10, sh = SHADE, w = ST;
@@ -1643,7 +1652,7 @@ const q39bars = G.bars({ cats:['Jul','Jun','May','Apr','Mar','Feb','Jan'], vals:
 const q40fig = fig(SV('0 0 180 110', 160, G.squares([[0,0],[1,0],[2,0]], 15, 10, 44) + G.squares([[0,0],[1,0]], 37, 54, 44)));
 
 TESTS.push({
-  id: 'rosyth', school: 'Rosyth School', short: 'Rosyth', exam: '2025 End-of-Year Examination', date: '2025',
+  id: 'rosyth', school: 'Practice Set F', short: 'Set F', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 30, desc: 'Questions 1 to 15 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 42, desc: 'Questions 16 to 36 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -1749,7 +1758,7 @@ TESTS.push({
 })();
 
 
-/* ===================== St. Hilda's Primary — P4 EOY 2025 ===================== */
+/* ===================== Practice Set G ===================== */
 (() => {
 const rows = (n, shaded) => SV(`0 0 104 ${n * 14 + 4}`, 104, Array.from({ length: n }, (_, i) => `<rect x="2" y="${2 + i * 14}" width="100" height="14" ${shaded.includes(i) ? SHADE : ST}/>`).join(''));
 
@@ -1806,7 +1815,7 @@ const q45fig = (() => {
 })();
 
 TESTS.push({
-  id: 'sthilda', school: "St. Hilda's Primary School", short: "St. Hilda's", exam: '2025 End-of-Year Examination', date: '28 Oct 2025',
+  id: 'sthilda', school: 'Practice Set G', short: 'Set G', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Booklet A: Multiple-Choice Questions', marks: 40, desc: 'Questions 1 to 20 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Booklet B: Short Answers', marks: 40, desc: 'Questions 21 to 40 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -1910,7 +1919,7 @@ TESTS.push({
 })();
 
 
-/* ===================== Catholic High School (Primary) — P4 EOY 2025 ===================== */
+/* ===================== Practice Set H ===================== */
 (() => {
 const q4fig = (() => { const x = k => 60 + k * 50; let s = `<line x1="20" y1="30" x2="300" y2="30" stroke="#334155" stroke-width="1.5" marker-start="url(#ah)" marker-end="url(#ah)"/>`;
   for (let k = 0; k <= 4; k++) s += G.line(x(k), k % 4 ? 23 : 16, x(k), k % 4 ? 37 : 44);
@@ -2014,7 +2023,7 @@ const q45fig = (() => {
 const q45table = G.table(['Figure', 'Shaded squares', 'Unshaded squares', 'Total'], [['1','8','1','9'],['2','12','4','16'],['3','16','9','25'],['4','?','?','36']]);
 
 TESTS.push({
-  id: 'catholichigh', school: 'Catholic High School (Primary)', short: 'Catholic High', exam: '2025 End-of-Year Examination', date: '28 Oct 2025',
+  id: 'catholichigh', school: 'Practice Set H', short: 'Set H', exam: 'Primary 4 Mathematics practice', date: '2025',
   sections: [
     { id: 'A', title: 'Section A: Multiple-Choice Questions', marks: 40, desc: 'Questions 1 to 20 carry 2 marks each. Choose the correct option.', work: 'none' },
     { id: 'B', title: 'Section B: Short Answers', marks: 40, desc: 'Questions 21 to 40 carry 2 marks each. Give your answers in the units stated.', work: 'optional' },
@@ -3975,6 +3984,7 @@ async function submitTest() {
 
 /* ===================== GEMINI MARKING ===================== */
 const MARKER_PROMPT = `You are a kind, experienced Singapore primary school maths teacher marking a Primary 4 practice paper.
+The student field may be the placeholder [Student] (their real name is not shared with you). Address them as "you"; if you must use a name, write [Student] exactly.
 You receive JSON: for each question its id, section, marks, question text, figure description (context), the student's final answer, their working (required in Section C / long-answer questions; optional elsewhere), the expected answer, a model solution and an automatic mark.
 Return one result for EVERY question id.
 
@@ -4012,7 +4022,8 @@ async function markWithApi() {
   const t = TEST, a = att, res = results, qs = QUESTIONS;
   const here = () => TEST === t;
   const payload = {
-    student: store.name || '', test: `${t.school} P4 Mathematics ${t.exam} – practice`,
+    student: studentDisplayName() ? STUDENT_TOKEN : '',
+    test: `${t.school} P4 Mathematics ${t.exam}`,
     answers: qs.map(q => {
       const card = $id('card-' + q.id), r = res[q.id];
       return {
@@ -4037,11 +4048,14 @@ async function markWithApi() {
       const q = qs.find(y => y.id === String(x.id)); if (!q) return;
       const r = res[q.id];
       r.awarded = guardAward(q, r.autoAwarded, x.awarded);
-      r.ai = { feedback: x.feedback || '', working: x.working || '' };
+      r.ai = {
+        feedback: detokenizeFromGemini(x.feedback || ''),
+        working: detokenizeFromGemini(x.working || '')
+      };
       if (r.awarded > r.autoAwarded && !/Method marks/.test(r.note)) r.note = (r.note ? r.note + ' ' : '') + 'Method marks given for your working.';
       if (here()) showFeedback(q, $id('card-' + q.id), r);
     });
-    a.aiOverall = data.overallFeedback || ''; a.aiDone = true;
+    a.aiOverall = detokenizeFromGemini(data.overallFeedback || ''); a.aiDone = true;
     a.markingStatus = `Marked automatically, with method marks and feedback from Gemini (${model}).`;
     // Invalidate so Buddy picks up Gemini awards/feedback (rebuild below if still on this paper)
     a.buddyDossier = null; a.buddyDossierAt = null;
@@ -4068,6 +4082,33 @@ const deadModels = new Set();
 let modelListPromise = null;
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const backoff = attempt => 1000 * 2 ** (attempt - 1) + Math.random() * 500;
+
+/** Privacy: never send the typed student name to Gemini — use this token instead. */
+const STUDENT_TOKEN = '[Student]';
+function studentDisplayName() {
+  const n = String(store?.name || '').trim();
+  return n.length >= 2 ? n : '';
+}
+function escapeRegExp(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function tokenizeForGemini(text) {
+  const name = studentDisplayName();
+  if (!name || text == null) return text;
+  return String(text).replace(new RegExp(escapeRegExp(name), 'gi'), STUDENT_TOKEN);
+}
+function detokenizeFromGemini(text) {
+  const name = studentDisplayName() || 'Student';
+  return String(text ?? '').replace(/\[Student\]/gi, name);
+}
+function deepTokenizeForGemini(value) {
+  if (typeof value === 'string') return tokenizeForGemini(value);
+  if (Array.isArray(value)) return value.map(deepTokenizeForGemini);
+  if (value && typeof value === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(value)) out[k] = deepTokenizeForGemini(v);
+    return out;
+  }
+  return value;
+}
 function readSticky() { try { const s = JSON.parse(localStorage.getItem(STICKY_KEY) || 'null'); return s && Date.now() - s.t < GEMINI.stickyMinutes * 60000 ? s.model : null; } catch (_) { return null; } }
 function writeSticky(model) { try { localStorage.setItem(STICKY_KEY, JSON.stringify({ model, t: Date.now() })); } catch (_) {} }
 async function discoverModels() {
@@ -4110,7 +4151,8 @@ async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, on
       const ctrl = new AbortController(), t = setTimeout(() => ctrl.abort(), Math.min(attemptTimeoutMs, left));
       let res, json;
       try {
-        res = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, { method: 'POST', headers: MARKING_API.headers, body: JSON.stringify(body), signal: ctrl.signal });
+        // Clone + tokenize so the typed name never leaves the browser toward Gemini
+        res = await fetch(`${GEMINI_BASE}/models/${model}:generateContent`, { method: 'POST', headers: MARKING_API.headers, body: JSON.stringify(deepTokenizeForGemini(body)), signal: ctrl.signal });
         json = await res.json().catch(() => ({}));
       } catch (e) {
         lastErr = new Error(e.name === 'AbortError' ? 'timed out' : 'network error: ' + e.message);
@@ -4253,7 +4295,7 @@ function testSummary() {
     return `${s.title.split(':')[0]} ${got}/${max}`;
   });
   const lost = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks).map(q => `Q${q.id} (${results[q.id]?.awarded || 0}/${q.marks})`);
-  return `Paper: ${TEST.school} ${TEST.exam}. Student${store.name ? ': ' + store.name : ''}. Score: ${tot}/${maxMarks(TEST)}. Sections: ${secBits.join(', ')}. Questions with marks lost: ${lost.join(', ') || 'none'}.`;
+  return `Paper: ${TEST.school} ${TEST.exam}. Student: ${studentDisplayName() ? STUDENT_TOKEN : '(not given)'}. Score: ${tot}/${maxMarks(TEST)}. Sections: ${secBits.join(', ')}. Questions with marks lost: ${lost.join(', ') || 'none'}.`;
 }
 /** Full marked-paper dossier for Maths Buddy — available from the first chat turn. */
 function buildFullPaperDossier() {
@@ -4392,11 +4434,11 @@ async function sendChat(textArg, opts = {}) {
   try {
     const { text: rawReply, model } = await callGemini({
       systemInstruction: { parts: [{ text: systemText }] },
-      contents: hist, // full conversation — every prior student/Buddy turn
+      contents: hist, // full conversation — every prior student/Buddy turn (name tokenized in callGemini)
       generationConfig: { temperature: 0.4 }
     }, { attemptTimeoutMs: 45000, budgetMs: 120000, onStatus: setStatus });
     typing.remove();
-    const reply = buddyReplyInScope(rawReply);
+    const reply = buddyReplyInScope(detokenizeFromGemini(rawReply));
     hist.push({ role: 'model', parts: [{ text: reply }] });
     log.push({ role: 'Maths Buddy', text: reply, time: Date.now(), model });
     saveStore();
@@ -4642,7 +4684,11 @@ Blank marks: ${report.blankMarks}; total lost: ${report.totalLost}.`;
     });
     const parsed = JSON.parse(String(text).trim().replace(/^```(?:json)?\s*|\s*```$/g, ''));
     if (parsed.summary && parsed.focusText) {
-      att.topicReport = { summary: String(parsed.summary).trim(), focusText: String(parsed.focusText).trim(), polishedAt: Date.now() };
+      att.topicReport = {
+        summary: detokenizeFromGemini(String(parsed.summary).trim()),
+        focusText: detokenizeFromGemini(String(parsed.focusText).trim()),
+        polishedAt: Date.now()
+      };
       saveStore();
       const body = $id('topic-report-body');
       if (body) {
@@ -4717,7 +4763,7 @@ function downloadChatPdf() {
 function downloadProgressPdf() {
   const w = pdfWriter('P4 Maths practice papers - progress report'); if (!w) return;
   w.text('Progress Report', { size: 18, bold: true, color: C.blue, after: 0.5 });
-  w.text('P4 Mathematics practice papers (2025 End-of-Year)', { size: 10, color: C.grey, after: 3 });
+  w.text('P4 Mathematics practice papers (independent practice sets)', { size: 10, color: C.grey, after: 3 });
   w.text(`Student: ${store.name || '(no name entered)'}`, { bold: true, after: 0.5 });
   w.text(`Downloaded: ${fmtDate(Date.now())}`, { size: 9, color: C.grey, after: 2 }); w.rule();
   TESTS.forEach(t => {
