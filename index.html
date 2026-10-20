@@ -3381,7 +3381,16 @@ function showQuestionPage(i, opts = {}) {
   updateJumpButtons();
   updatePaperTimerDisplay();
   if (!marked) beginQuestionTime(key, { countVisit: !sameScreen });
-  if (!opts.skipScroll) window.scrollTo({ top: 0, behavior: 'smooth' });
+  if (opts.skipScroll) {
+    // caller scrolls (e.g. focusQuestion targets a specific card)
+  } else if (marked) {
+    // After grading, the results card sits above the questions — scroll the
+    // current question into view instead of jumping to the page top.
+    const card = $id('card-' + page[0].id);
+    if (card) requestAnimationFrame(() => card.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+  } else {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 }
 
 function renderInteractive(q, card, reveal = false) {
