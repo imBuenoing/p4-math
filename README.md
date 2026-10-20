@@ -1,6 +1,8 @@
 # P4 Maths Practice Papers
 
-Interactive 2025 End-of-Year Primary 4 maths practice papers with **one question screen at a time** (multi-part questions stay together), per-screen timing for reports, local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
+Independent Primary 4 maths **practice sets** (not affiliated with MOE or any school) with **one question screen at a time** (multi-part questions stay together), per-screen timing for reports, local auto-marking, parent PIN gate, Gemini method-mark feedback, and Maths Buddy chat.
+
+Typed student names stay on-device for the UI/PDFs; they are replaced with `[Student]` before any Gemini request.
 
 ## Gemini API key
 
