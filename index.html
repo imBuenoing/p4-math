@@ -59,6 +59,7 @@
   .qcard.q-hidden{display:none}
   .qcard{scroll-margin-top:1rem}
   .qcard.locked .math-tb{display:none}
+  textarea.work-required{min-height:11rem;resize:vertical}
   #q-jump button.answered{background:#eff6ff;border-color:#93c5fd;color:#1d4ed8}
   #q-jump button.current{background:#2563eb;border-color:#2563eb;color:#fff}
   #q-jump button.missed{background:#fef2f2;border-color:#fca5a5;color:#b91c1c}
@@ -2950,7 +2951,7 @@ function pageIsFullyAnswered(page) {
   return page.every(q => {
     const card = $id('card-' + q.id);
     const v = card ? captureAnswer(q, card) : att?.answers?.[q.id];
-    return hasAnswer(q, v);
+    return questionComplete(q, v);
   });
 }
 /** When every part on the current screen first has an answer, bank attempt time and switch to review timing. */
@@ -3208,11 +3209,22 @@ function renderQuiz() {
     const sec = sectionOf(q.sec);
     const preHTML = q.pre ? `<div class="mb-4 p-4 rounded-xl bg-slate-50 border border-slate-200 text-slate-700">${q.pre}${q.preFig || ''}</div>` : '';
     const needsSymbols = sec.work !== 'none' || ['num', 'text', 'frac', 'mixed', 'multi'].includes(q.type);
-    const workBox = sec.work === 'none' ? '' : `
-      <details class="mt-3" ${sec.work === 'open' ? 'open' : ''}>
-        <summary class="text-sm text-slate-500 cursor-pointer select-none">My working${sec.work === 'optional' ? ' (optional)' : ''}</summary>
-        <textarea data-role="work" rows="${sec.work === 'open' ? 4 : 2}" class="inp w-full mt-2 text-sm font-mono" placeholder="Show your steps here…"></textarea>
+    let workBox = '';
+    if (sec.work === 'open') {
+      // Section C / long answers — working is required for method marks
+      workBox = `
+      <div class="mt-4 rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+        <label class="block text-sm font-semibold text-amber-900">Working required</label>
+        <p class="text-xs text-amber-800/80 mt-0.5 mb-2">Show your steps and equations. Marks are not based on the final answer alone.</p>
+        <textarea data-role="work" rows="8" class="inp work-required w-full text-sm font-mono bg-white" placeholder="Write your working here…" aria-required="true"></textarea>
+      </div>`;
+    } else if (sec.work === 'optional') {
+      workBox = `
+      <details class="mt-3">
+        <summary class="text-sm text-slate-500 cursor-pointer select-none">My working (optional)</summary>
+        <textarea data-role="work" rows="3" class="inp w-full mt-2 text-sm font-mono" placeholder="Show your steps here…"></textarea>
       </details>`;
+    }
     const figHTML = q.fig ? `<div data-role="figwrap">${q.fig}</div>${q.figAlt ? `<button type="button" class="prot-btn text-sm font-medium px-3 py-1 rounded-lg border border-blue-200 text-blue-700 hover:bg-blue-50" data-on="0">📐 Show protractor</button>` : ''}` : '';
     stage.insertAdjacentHTML('beforeend', `
       <div class="qcard q-hidden bg-white p-5 rounded-xl border border-slate-200 shadow-sm" id="card-${q.id}" data-qid="${q.id}">
@@ -3335,7 +3347,7 @@ function updateJumpButtons() {
       const allOk = page.every(q => (results[q.id]?.awarded || 0) >= q.marks);
       const anyMiss = page.some(q => (results[q.id]?.awarded || 0) < q.marks);
       btn.classList.add(allOk ? 'ok' : anyMiss ? 'missed' : 'answered');
-    } else if (page.every(q => hasAnswer(q, att?.answers?.[q.id] || ($id('card-' + q.id) ? captureAnswer(q, $id('card-' + q.id)) : null)))) {
+    } else if (page.every(q => questionComplete(q, att?.answers?.[q.id] || ($id('card-' + q.id) ? captureAnswer(q, $id('card-' + q.id)) : null)))) {
       btn.classList.add('answered');
     }
   });
@@ -3550,6 +3562,18 @@ function hasAnswer(q, v) {
   if (q.type === 'mcq') return !!v.mcq;
   if (v.st) { const s = v.st; return !!((s.sel && Object.keys(s.sel).length) || (s.x && s.x.length) || (s.pts && Object.keys(s.pts).length) || (s.dir !== undefined && s.dir !== null)); }
   return Object.entries(v).some(([k, val]) => k !== 'work' && String(val || '').trim() !== '');
+}
+function workRequired(q) {
+  return sectionOf(q.sec)?.work === 'open';
+}
+function hasWorking(v) {
+  return !!(v && String(v.work || '').trim());
+}
+/** Answer present, and required working filled when the section needs it. */
+function questionComplete(q, v) {
+  if (!hasAnswer(q, v)) return false;
+  if (workRequired(q) && !hasWorking(v)) return false;
+  return true;
 }
 let saveTimer = null;
 function scheduleSave() {
@@ -3891,8 +3915,16 @@ function openPin() {
   if (marked) return;
   saveAnswers();
   const blanks = QUESTIONS.filter(q => !hasAnswer(q, captureAnswer(q, $id('card-' + q.id)))).length;
+  const noWork = QUESTIONS.filter(q => {
+    if (!workRequired(q)) return false;
+    const v = captureAnswer(q, $id('card-' + q.id));
+    return hasAnswer(q, v) && !hasWorking(v);
+  }).map(q => 'Q' + q.id);
+  const warns = [];
+  if (blanks) warns.push(`${blanks} question${blanks > 1 ? 's are' : ' is'} not answered yet. They will get 0 marks.`);
+  if (noWork.length) warns.push(`${noWork.length} question${noWork.length > 1 ? 's have' : ' has'} an answer but no working (${noWork.slice(0, 8).join(', ')}${noWork.length > 8 ? '…' : ''}). Method marks need working.`);
   askPin({ title: 'Parent PIN needed', msg: 'Ask a parent or teacher to enter the PIN to mark this test.', okLabel: 'Mark test',
-    blanks: blanks ? `⚠ ${blanks} question${blanks > 1 ? 's are' : ' is'} not answered yet. They will get 0 marks.` : '' }, () => { pinPassed = true; submitTest(); });
+    blanks: warns.length ? '⚠ ' + warns.join(' ') : '' }, () => { pinPassed = true; submitTest(); });
 }
 function closePin() { const m = $id('pin-modal'); m.classList.add('hidden'); m.classList.remove('flex'); pinAction = null; }
 function checkPin() {
@@ -3938,13 +3970,13 @@ async function submitTest() {
 
 /* ===================== GEMINI MARKING ===================== */
 const MARKER_PROMPT = `You are a kind, experienced Singapore primary school maths teacher marking a Primary 4 practice paper.
-You receive JSON: for each question its id, section, marks, question text, figure description (context), the student's final answer, their optional working, the expected answer, a model solution and an automatic mark.
+You receive JSON: for each question its id, section, marks, question text, figure description (context), the student's final answer, their working (required in Section C / long-answer questions; optional elsewhere), the expected answer, a model solution and an automatic mark.
 Return one result for EVERY question id.
 
 Marking rules:
 - If autoMark.correct is true, award full marks.
 - If autoOnly is true (multiple choice, drawing and clicking questions): award exactly autoMark.awarded.
-- Otherwise the final answer is wrong, incomplete or not in the required form. Award method marks only for correct, relevant steps the student actually wrote in studentWorking: at most 1 mark in Section B, at most (marks - 1) in Section C. Never award less than autoMark.awarded. If there is no working, award autoMark.awarded.
+- Otherwise the final answer is wrong, incomplete or not in the required form. Award method marks only for correct, relevant steps the student actually wrote in studentWorking: at most 1 mark in Section B, at most (marks - 1) in Section C. Never award less than autoMark.awarded. If there is no working, award autoMark.awarded only — do not invent method marks. In Section C, remind the student in feedback when working is missing.
 
 feedback: 1-2 short sentences in simple English for a 10-year-old, speaking to the student as "you". If not fully correct, name the specific mistake you can see from their answer or working (e.g. "You found the area of the plot but forgot to subtract the field."). If not answered, encourage them to try. If correct, one short sentence of praise.
 working: if not fully correct, a short step-by-step solution (at most 5 lines) a P4 student can follow, using the units/model method where natural; otherwise an empty string.
