@@ -3040,7 +3040,7 @@ function retakeTest(id) {
   const t = TESTS.find(x => x.id === id), a = store.attempts[id];
   if (a?.status === 'marked' && !confirm(`Retake ${t.short}? Your answers, marks and chat for this paper will be cleared (the score ${scoreOf(a)}/${maxMarks(t)} is kept in the history). Download the PDFs first if you want to keep them.`)) return;
   const hist = (a?.history || []).concat(a?.status === 'marked' ? [{ score: scoreOf(a), max: maxMarks(t), at: a.submittedAt }] : []);
-  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist, timings: {}, startedAt: null, finishedAt: null, pageIndex: 0, qIndex: 0 };
+  store.attempts[id] = { status: 'new', answers: {}, results: null, chatLog: [], chatHistory: [], history: hist, timings: {}, startedAt: null, finishedAt: null, pageIndex: 0, qIndex: 0, buddyDossier: null, buddyDossierAt: null };
   saveStore();
   openTest(id);
 }
@@ -3832,6 +3832,8 @@ function showMarkedState(fresh) {
   if (aiOverall) { const box = $id('api-overall'); box.textContent = aiOverall; box.style.whiteSpace = 'pre-wrap'; box.classList.remove('hidden'); }
   $id('results-card').classList.remove('hidden');
   showQuestionPage(Math.min(pageIndex, PAGES.length - 1));
+  // Full paper dossier ready from the first chat turn (refreshed after Gemini marking)
+  ensureBuddyDossier(true);
   if (!fresh) {
     updateSummary(att.markingStatus || 'Marked.');
     if (!att.aiDone && MARKING_API.url) $id('retry-ai').classList.remove('hidden');
@@ -3961,7 +3963,7 @@ async function submitTest() {
   });
   saveStore();
   showMarkedState(true);
-  addMsg('assistant', "Hi, I'm Maths Buddy! Your test has been marked. Press 💬 Ask next to any question, or type a question number like Q12, and I'll help you understand it.");
+  addMsg('assistant', "Hi, I'm Maths Buddy! I've got your whole marked paper — every answer and your working. Ask about any question (💬 Ask or type Q12), or about the paper overall. I'll remember our chat as we go.");
   updateSummary(MARKING_API.url ? 'Marked automatically. Gemini is now checking your working and writing feedback (this can take up to a minute)…' : 'Marked automatically.');
   saveStore();
   $id('results-card').scrollIntoView({ behavior: 'smooth' });
@@ -4038,11 +4040,14 @@ async function markWithApi() {
     });
     a.aiOverall = data.overallFeedback || ''; a.aiDone = true;
     a.markingStatus = `Marked automatically, with method marks and feedback from Gemini (${model}).`;
+    // Invalidate so Buddy picks up Gemini awards/feedback (rebuild below if still on this paper)
+    a.buddyDossier = null; a.buddyDossierAt = null;
     saveStore();
     if (here()) {
       aiOverall = a.aiOverall;
       if (aiOverall) { const box = $id('api-overall'); box.textContent = aiOverall; box.style.whiteSpace = 'pre-wrap'; box.classList.remove('hidden'); }
       updateSummary(a.markingStatus);
+      ensureBuddyDossier(true);
     }
   } catch (e) {
     a.markingStatus = `Gemini feedback unavailable: ${friendlyError(e)} Your automatic marks are shown.`;
@@ -4131,11 +4136,12 @@ async function callGemini(body, { attemptTimeoutMs = 30000, budgetMs = 90000, on
 }
 
 /* ===================== CHAT ASSISTANT (Maths Buddy) ===================== */
-const TUTOR_PROMPT = `You are "Maths Buddy", a friendly, patient maths tutor for a Primary 4 student (about 10 years old) in Singapore. The student has just finished a practice test that has been marked and is asking about it.
+const TUTOR_PROMPT = `You are "Maths Buddy", a friendly, patient maths tutor for a Primary 4 student (about 10 years old) in Singapore. The student has just finished a practice test that has been marked.
+This is a multi-turn conversation. You already have the FULL marked paper dossier (every question: what the student wrote, their working, marks, and solutions). Remember earlier turns in this chat and continue naturally — do not ask the student to repeat what they already said.
 How to help:
-- Use the marked test data sent with the message: paper overview, the focus question(s), the student's own final answer and working, marks, marker feedback, and any related parts. Don't invent details that aren't there.
+- Use the paper dossier and the chat history. Don't invent details that aren't there.
 - Always ground your help in what THIS student wrote. When explaining a mistake, refer to their answer and/or working (quote or paraphrase briefly). If working is missing, say so and teach from the model solution without inventing their steps.
-- Use related parts (e.g. Q41a with Q41b) or the paper overview when that helps the student see the bigger picture.
+- Use related parts (e.g. Q41a with Q41b) or the whole-paper picture when that helps.
 - Explain in short, simple steps (usually under 120 words). Use the Singapore model or units method when it helps. End with one small check question when it's useful.
 - If the student thinks the marking is wrong, check carefully. If they are right, say so honestly and suggest they show a parent or teacher (you cannot change marks). If the marking is right, explain kindly why.
 - Be warm and encouraging; never make the student feel bad.
@@ -4212,45 +4218,55 @@ function testSummary() {
   const lost = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks).map(q => `Q${q.id} (${results[q.id]?.awarded || 0}/${q.marks})`);
   return `Paper: ${TEST.school} ${TEST.exam}. Student${store.name ? ': ' + store.name : ''}. Score: ${tot}/${maxMarks(TEST)}. Sections: ${secBits.join(', ')}. Questions with marks lost: ${lost.join(', ') || 'none'}.`;
 }
-/** Compact paper overview for Maths Buddy — student's attempts on missed questions. */
-function paperBuddyOverview(focusIds = []) {
-  const lines = [testSummary()];
+/** Full marked-paper dossier for Maths Buddy — available from the first chat turn. */
+function buildFullPaperDossier() {
+  const lines = ['FULL MARKED PAPER DOSSIER', testSummary()];
   try {
     const tr = typeof buildTopicReport === 'function' ? buildTopicReport(TEST, results, att?.timings || {}) : null;
     if (tr?.focus?.length) lines.push('Weakest topics on this paper: ' + tr.focus.map(b => `${b.label} (lost ${b.lost})`).join('; '));
+    if (tr?.strengths?.length) lines.push('Strengths on this paper: ' + tr.strengths.map(b => b.label).join('; '));
     if (tr?.pacing?.message) lines.push('Pacing: ' + tr.pacing.message);
     if (tr?.biggestIssue) lines.push('Biggest issue: ' + tr.biggestIssue);
+    if (tr?.focusText) lines.push('Suggested focus: ' + tr.focusText);
   } catch (_) {}
-  const missed = QUESTIONS.filter(q => (results[q.id]?.awarded || 0) < q.marks);
-  const focus = new Set(focusIds);
-  // Prefer focus questions, then other misses (cap to keep the prompt small)
-  const ordered = [
-    ...missed.filter(q => focus.has(q.id)),
-    ...missed.filter(q => !focus.has(q.id))
-  ].slice(0, 10);
-  if (ordered.length) {
-    lines.push('Student attempts on questions with marks lost:');
-    ordered.forEach(q => {
-      const r = results[q.id] || {};
-      const given = studentAnswerText(q.id) || '(not answered)';
-      const working = studentWorkingText(q.id);
-      const workBit = working ? ` | working: ${working.replace(/\s+/g, ' ').slice(0, 160)}` : ' | working: (none)';
-      lines.push(`- Q${q.id}: ${r.awarded ?? 0}/${q.marks}; wrote ${given}${workBit}`);
-    });
-  }
+  if (aiOverall) lines.push('Overall marker feedback: ' + String(aiOverall).replace(/\s+/g, ' ').trim().slice(0, 500));
+  lines.push('Questions (every item on this paper):');
+  QUESTIONS.forEach(q => {
+    const r = results[q.id] || {};
+    const awarded = r.awarded ?? 0;
+    const full = awarded >= q.marks;
+    const given = studentAnswerText(q.id) || '(not answered)';
+    const working = studentWorkingText(q.id);
+    if (full) {
+      lines.push(`Q${q.id} [${q.sec}, ${awarded}/${q.marks} correct] answer: ${given}${working ? ` | working: ${working.replace(/\s+/g, ' ').slice(0, 120)}` : ''}`);
+      return;
+    }
+    // Missed / partial — full detail so Buddy can discuss any question without a fresh paste
+    lines.push(qContext(q.id, { focus: true }));
+    lines.push('---');
+  });
   return lines.join('\n');
 }
-function buildBuddyContext(focusIds) {
+function ensureBuddyDossier(force = false) {
+  if (!att || !TEST || !marked) return '';
+  if (force || !att.buddyDossier) {
+    att.buddyDossier = buildFullPaperDossier();
+    att.buddyDossierAt = Date.now();
+    saveStore();
+  }
+  return att.buddyDossier;
+}
+/** Extra spotlight for the question(s) the student is asking about right now. */
+function buildFocusSpotlight(focusIds) {
+  if (!focusIds?.length) return '';
   const related = [];
   focusIds.forEach(id => relatedQuestionIds(id).forEach(rid => {
     if (!focusIds.includes(rid) && !related.includes(rid)) related.push(rid);
   }));
-  const parts = [
-    'PAPER OVERVIEW\n' + paperBuddyOverview(focusIds),
+  return ['CURRENT FOCUS (also in the dossier — look here first)',
     ...focusIds.map(id => qContext(id, { focus: true })),
     ...related.map(id => qContext(id, { focus: false }))
-  ].filter(Boolean);
-  return parts.join('\n\n');
+  ].filter(Boolean).join('\n\n');
 }
 function fmt(text) {
   let h = esc(text).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
@@ -4313,24 +4329,21 @@ async function sendChat(textArg, opts = {}) {
   if (!ids.length && activeQ) ids = [activeQ];
   if (ids.length) { activeQ = ids[0]; showChips(activeQ); }
   if (!opts.retry) { addMsg('user', text); log.push({ role: 'Student', text, time: Date.now(), about: ids.map(i => 'Q' + i).join(', ') }); saveStore(); }
-  // Fresh marked-paper context on this turn (student answer + working + related parts)
-  const ctx = buildBuddyContext(ids);
-  hist.push({ role: 'user', parts: [{ text: `[Marked test data]\n${ctx}\n[/Marked test data]\n\nStudent: ${text}` }] });
+  // Multi-turn: keep the full dialogue. Paper dossier lives in systemInstruction from the start.
+  const dossier = ensureBuddyDossier();
+  const focus = buildFocusSpotlight(ids);
+  const userLine = (ids.length ? `(Asking about Q${ids.join(', Q')})\n` : '') + 'Student: ' + text;
+  hist.push({ role: 'user', parts: [{ text: userLine }] });
   chatBusy = true; $id('chat-send').disabled = true;
   const typing = addMsg('assistant', '', { html: '<span class="dots"><span></span><span></span><span></span></span><span class="typing-status text-xs text-slate-500 ml-2"></span>' });
   const setStatus = s => { const el = typing.querySelector('.typing-status'); if (el) el.textContent = s; };
-  // Older turns: keep the student's words only so we don't repeat the whole paper every message
-  const stripMarkedBlock = s => String(s || '').replace(/\[Marked test data\][\s\S]*?\[\/Marked test data\]\s*/g, '').trim();
-  const contentsForApi = hist.slice(-12).map((turn, i, arr) => {
-    if (turn.role !== 'user' || i === arr.length - 1) return turn;
-    const cleaned = stripMarkedBlock(turn.parts?.[0]?.text);
-    return { role: 'user', parts: [{ text: cleaned || 'Student: (earlier message)' }] };
-  });
+  const systemText = TUTOR_PROMPT + '\n\n' + dossier + (focus ? '\n\n' + focus : '');
   try {
     const { text: reply, model } = await callGemini({
-      systemInstruction: { parts: [{ text: TUTOR_PROMPT + '\n\n' + paperBuddyOverview(ids) }] },
-      contents: contentsForApi, generationConfig: { temperature: 0.4 }
-    }, { attemptTimeoutMs: 30000, budgetMs: 90000, onStatus: setStatus });
+      systemInstruction: { parts: [{ text: systemText }] },
+      contents: hist, // full conversation — every prior student/Buddy turn
+      generationConfig: { temperature: 0.4 }
+    }, { attemptTimeoutMs: 45000, budgetMs: 120000, onStatus: setStatus });
     typing.remove();
     hist.push({ role: 'model', parts: [{ text: reply }] });
     log.push({ role: 'Maths Buddy', text: reply, time: Date.now(), model });
@@ -4349,7 +4362,7 @@ function setChatLocked(locked) {
 function resetChat() { activeQ = null; $id('chat-msgs').innerHTML = ''; $id('chat-chips').innerHTML = ''; $id('chat-input').value = ''; setChatLocked(true); }
 function restoreChat() {
   $id('chat-msgs').innerHTML = '';
-  addMsg('assistant', "Welcome back! This paper has been marked. Press 💬 Ask next to any question and I'll help you understand it.");
+  addMsg('assistant', "Welcome back! I've still got your full marked paper and our earlier chat. Ask about any question or the whole paper — I'll pick up where we left off.");
   chatLog.forEach(m => {
     if (m.role === 'Student') addMsg('user', m.text);
     else if (m.role === 'Error') addMsg('assistant', `Sorry, I couldn't answer just now. ${m.text}`, { error: true });
